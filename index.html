@@ -69,18 +69,6 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 
 
 
-.artist-link{
-  align-self:flex-start;border:0;background:none;padding:0;margin:0 0 3px;
-  color:var(--gold2);font-size:19px;font-weight:700;text-align:left;
-  text-decoration:underline;text-decoration-color:rgba(242,201,107,.34);text-underline-offset:3px
-}
-.artist-link:active{color:#fff0b8}
-.mini-artist-link{
-  display:block;max-width:100%;border:0;background:none;padding:0;margin:0;
-  color:var(--gold2);font-size:11px;text-align:left;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;text-decoration:underline;text-decoration-color:rgba(242,201,107,.26);
-  text-underline-offset:2px
-}
 .up-next{
   color:var(--muted);font-size:10px;letter-spacing:.7px;margin:1px 0 5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis
@@ -89,6 +77,18 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
   margin:2px 0 9px;padding:8px;border:1px solid #3d301d;border-radius:6px;
   color:var(--gold2);background:#0b0907;font-size:10px;letter-spacing:.7px;
   white-space:normal;line-height:1.25
+}
+
+
+.category-random{
+  height:32px;padding:0 11px;border:1px solid var(--gold);border-radius:6px;
+  background:#151009;color:var(--gold2);font-size:10px;font-weight:800;letter-spacing:.6px
+}
+.category-random:active{background:#2a1d0b}
+@media (max-width:720px){
+  .category-random{padding:0 7px;font-size:9px}
+  .trackpick-actions{grid-template-columns:1fr 1fr}
+  #addQueueBtn{grid-column:1/-1}
 }
 
 /* v12: tile visuals taken from the original approved mock-up */
@@ -322,7 +322,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 .trackpick-art{width:72px;height:72px;border:1px solid var(--line);border-radius:6px;background:#17120b center/cover no-repeat}
 .trackpick-info{min-width:0}.trackpick-info b,.trackpick-info span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trackpick-info b{font-size:20px}.trackpick-info span{color:var(--gold2);font-size:13px;margin-top:4px}
-.trackpick-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.trackpick-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
 .trackpick-actions button{height:50px;border:1px solid var(--gold);border-radius:8px;background:#12100c;color:var(--gold2);font-weight:700}
 .trackpick-actions .queue-action{background:#20170a}
 .trackpick-cancel{width:100%;height:40px;margin-top:9px;border:1px solid #44351f;border-radius:7px;background:#090909;color:var(--muted)}
@@ -359,7 +359,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 </section>
 
 <section id="results" class="screen"><div class="subscreen">
-<div class="subhead"><button class="back" data-screen="home">‹ BACK</button><h2 id="resultsTitle">RESULTS</h2><span></span></div>
+<div class="subhead"><button class="back" data-screen="home">‹ BACK</button><h2 id="resultsTitle">RESULTS</h2><button class="category-random" id="categoryRandomBtn" style="display:none">⤨ PLAY RANDOM</button></div>
 <div class="list" id="resultsList"></div>
 </div></section>
 
@@ -378,7 +378,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 <div class="cover" id="cover"></div>
 <div class="details">
 <button class="back" data-screen="home">‹ BACK</button>
-<h1 id="playerTitle">Nothing playing</h1><button type="button" class="artist-link" id="playerArtist">Spotify</button><p id="playerAlbum">—</p><div class="up-next" id="upNext">UP NEXT · —</div>
+<h1 id="playerTitle">Nothing playing</h1><h2 id="playerArtist">Spotify</h2><p id="playerAlbum">—</p><div class="up-next" id="upNext">UP NEXT · —</div>
 <div class="seek"><div class="times"><span id="curTime">0:00</span><span id="durTime">0:00</span></div><input id="seekSlider" type="range" min="0" max="1000" value="0"></div>
 <div class="bigcontrols"><button class="round" data-cmd="prev">◀</button><button class="round main" id="bigPlay">▶</button><button class="round" data-cmd="next">▶</button></div>
 <div class="utility"><button id="queueBtn">QUEUE</button><button id="shuffleBtn">SHUFFLE</button><button id="repeatBtn">REPEAT</button><button id="refreshPlayer">REFRESH</button></div>
@@ -390,7 +390,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 
 <footer class="nowbar" id="nowbar"><div class="nowprogress"><i id="nowProgress"></i></div>
 <div class="albumthumb" id="miniArt"></div>
-<div class="track"><b id="miniTitle">Nothing playing</b><button type="button" class="mini-artist-link" id="miniArtist">Spotify</button><small id="miniAlbum">—</small></div>
+<div class="track"><b id="miniTitle">Nothing playing</b><span id="miniArtist">Spotify</span><small id="miniAlbum">—</small></div>
 <div class="playerbuttons"><button class="round" data-cmd="prev">◀</button><button class="round main" id="miniPlay">▶</button><button class="round" data-cmd="next">▶</button></div>
 <div class="volbox"><span>🔊</span><input id="volumeSlider" type="range" min="0" max="100" value="65"><span id="volText">65%</span></div>
 </footer>
@@ -424,6 +424,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
     </div>
     <div class="trackpick-actions">
       <button class="queue-action primary" id="addQueueBtn">＋ ADD TO QUEUE</button>
+      <button id="playMixBtn" style="display:none">⤨ PLAY MIX</button>
       <button id="playNowBtn">▶ PLAY NOW</button>
     </div>
     <button class="trackpick-cancel" id="trackPickCancel">CANCEL</button>
@@ -513,6 +514,8 @@ function renderCategories(){
 }
 const trackCache=new Map();
 let pickedUri='';
+let currentMixTracks=[];
+let currentMixName='';
 
 function renderTracks(list,target){
  list.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
@@ -529,6 +532,8 @@ function chooseTrack(uri){
  $('trackPickTitle').textContent=t.name||'Track';
  $('trackPickArtist').textContent=(t.artists||[]).map(a=>a.name).join(', ');
  const art=imgUrl(t); $('trackPickArt').style.backgroundImage=art?`url("${art}")`:'none';
+ const canMix=currentMixTracks.some(x=>x?.uri===uri);
+ $('playMixBtn').style.display=canMix?'':'none';
  $('trackPickOverlay').classList.add('show')
 }
 function closeTrackPick(){$('trackPickOverlay').classList.remove('show')}
@@ -591,6 +596,8 @@ async function artistTracks(artist,year,recent){
 }
 async function openCategory(index){
  const c=categories[index];if(!c)return;
+ currentMixTracks=[];
+ $('categoryRandomBtn').style.display='none';
  $('resultsTitle').textContent=c.name;showScreen('results');
  $('resultsList').innerHTML='<div class="row"><div></div><div class="song"><b>Building a varied '+esc(c.name)+' selection…</b><span>More artists, fewer repeats</span></div><div></div></div>';
  try{
@@ -616,6 +623,9 @@ async function openCategory(index){
    if(t?.uri&&!seen.has(k)){seen.add(k);all.push(t)}
   }
 
+  currentMixTracks=all;
+  currentMixName=c.name;
+  $('categoryRandomBtn').style.display=all.length>1?'':'none';
   renderTracks(all,$('resultsList'));
   const artistCount=new Set(all.map(t=>String(t?.artists?.[0]?.name||''))).size;
   $('resultsTitle').textContent=c.name+' · '+all.length+' TRACKS · '+artistCount+' ARTISTS'
@@ -699,6 +709,59 @@ function showDeviceRecovery(message){
  openDrawer()
 }
 
+
+function primaryArtist(t){
+ return String(t?.artists?.[0]?.name||'').toLowerCase()
+}
+function makeMixedOrder(tracks,firstUri='',limit=15){
+ const pool=shuffleCopy((tracks||[]).filter(t=>t?.uri));
+ const first=firstUri?pool.find(t=>t.uri===firstUri):null;
+ const rest=pool.filter(t=>!first||t.uri!==first.uri);
+ const out=[];
+ if(first)out.push(first);
+
+ // Prefer not to place the same main artist back-to-back.
+ while(rest.length && out.length<limit){
+  const prev=out.length?primaryArtist(out[out.length-1]):'';
+  let idx=rest.findIndex(t=>primaryArtist(t)!==prev);
+  if(idx<0)idx=0;
+  out.push(rest.splice(idx,1)[0])
+ }
+ return out.slice(0,limit)
+}
+async function playTrackList(tracks,label){
+ const mix=(tracks||[]).filter(t=>t?.uri).slice(0,15);
+ if(!mix.length)return;
+ try{
+  await ensureDevice();
+  await api('/me/player/play?device_id='+encodeURIComponent(targetDevice),{
+   method:'PUT',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({uris:mix.map(t=>t.uri)})
+  });
+  mix.forEach(t=>rememberRecentUri(t.uri));
+  toast('Playing '+mix.length+'-track '+(label||'mix'));
+  closeTrackPick();
+  showScreen('player');
+  setTimeout(()=>{
+   refreshPlayer().catch(()=>{});
+   refreshQueueCount().catch(()=>{})
+  },500)
+ }catch(e){showDeviceRecovery(e.message)}
+}
+function playCategoryRandom(){
+ if(!currentMixTracks.length)return;
+ const mix=makeMixedOrder(currentMixTracks,'',15);
+ playTrackList(mix,currentMixName)
+}
+function playSelectedMix(){
+ if(!pickedUri||!currentMixTracks.length)return;
+ const mix=makeMixedOrder(currentMixTracks,pickedUri,15);
+ playTrackList(mix,currentMixName)
+}
+$('categoryRandomBtn').onclick=playCategoryRandom;
+$('playMixBtn').onclick=playSelectedMix;
+
 async function playUri(uri){
  try{
   await ensureDevice();
@@ -727,8 +790,6 @@ async function addToQueue(uri){
 $('playNowBtn').onclick=()=>{if(!pickedUri)return;const uri=pickedUri;closeTrackPick();playUri(uri)};
 $('addQueueBtn').onclick=()=>{if(!pickedUri)return;addToQueue(pickedUri)};
 
-let currentArtistWeb='';
-
 async function refreshPlayer(){
  const s=await api('/me/player');
  if(!s||!s.item){
@@ -736,7 +797,6 @@ async function refreshPlayer(){
   $('miniArtist').textContent='Spotify';
   $('miniAlbum').textContent='—';
   $('playerArtist').textContent='Spotify';
-  currentArtistWeb='';
   $('miniPlay').textContent='▶';
   $('bigPlay').textContent='▶';
   $('nowProgress').style.width='0%';
@@ -754,7 +814,6 @@ async function refreshPlayer(){
  $('playerArtist').textContent=artists;
  $('playerAlbum').textContent=t.album?.name||'';
 
- currentArtistWeb=t.artists?.[0]?.external_urls?.spotify||'';
  rememberRecentUri(t.uri);
 
  $('miniArt').style.backgroundImage=art?`url("${art}")`:'none';
@@ -779,14 +838,6 @@ async function refreshPlayer(){
  }
 }
 
-function openCurrentArtist(e){
- if(e){e.preventDefault();e.stopPropagation()}
- if(!currentArtistWeb){toast('No artist page available');return}
- // This is Spotify's official artist URL; Android can hand it to the Spotify app.
- window.location.href=currentArtistWeb
-}
-$('playerArtist').addEventListener('click',openCurrentArtist);
-$('miniArtist').addEventListener('click',openCurrentArtist);
 
 async function togglePlay(){
  await ensureDevice();
@@ -835,9 +886,9 @@ $('queueBtn').onclick=openQueue;
 
 let st;
 $('searchInput').oninput=()=>{clearTimeout(st);const q=$('searchInput').value.trim();if(q.length<2){$('searchResults').innerHTML='';return}
-st=setTimeout(async()=>{try{const tracks=await fetchSearchPages(q,2);renderTracks(tracks,$('searchResults'))}catch(e){toast(e.message)}},300)};
-$('favouritesBtn').onclick=async()=>{showScreen('results');$('resultsTitle').textContent='FAVOURITES';try{const d=await api('/me/tracks?limit=50');renderTracks((d?.items||[]).map(x=>x.track||x.item).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
-$('recentBtn').onclick=async()=>{showScreen('results');$('resultsTitle').textContent='RECENTLY PLAYED';try{const d=await api('/me/player/recently-played?limit=50');renderTracks((d?.items||[]).map(x=>x.track).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
+st=setTimeout(async()=>{try{currentMixTracks=[];$('categoryRandomBtn').style.display='none';const tracks=await fetchSearchPages(q,2);renderTracks(tracks,$('searchResults'))}catch(e){toast(e.message)}},300)};
+$('favouritesBtn').onclick=async()=>{currentMixTracks=[];$('categoryRandomBtn').style.display='none';showScreen('results');$('resultsTitle').textContent='FAVOURITES';try{const d=await api('/me/tracks?limit=50');renderTracks((d?.items||[]).map(x=>x.track||x.item).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
+$('recentBtn').onclick=async()=>{currentMixTracks=[];$('categoryRandomBtn').style.display='none';showScreen('results');$('resultsTitle').textContent='RECENTLY PLAYED';try{const d=await api('/me/player/recently-played?limit=50');renderTracks((d?.items||[]).map(x=>x.track).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
 
 function openDrawer(){$('drawer').classList.add('open');$('overlay').classList.add('show');loadDevices().catch(()=>setDeviceIndicator(null))}
 function closeDrawer(){$('drawer').classList.remove('open');$('overlay').classList.remove('show')}
