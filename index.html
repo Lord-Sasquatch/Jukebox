@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png">
+<!-- Jukebox v16: Web Playback SDK engine; v12/v15 visuals preserved -->
 <title>Jukebox</title>
 <style>
 :root{
@@ -413,10 +414,10 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
   <div class="playing-on" id="playingOn">PLAYING ON · Checking…</div>
   <label>Playback device</label>
   <select id="deviceSelect"><option value="">Loading devices…</option></select>
-  <button id="reloadDevices">REFRESH DEVICES</button>
-  <small id="volumeStatus">Checking remote volume support…</small>
+  <button id="reloadDevices">REFRESH PLAYER</button>
+  <small id="volumeStatus">JUKEBOX browser volume will appear here.</small>
   <button id="logoutBtn">DISCONNECT SPOTIFY</button>
-  <small>Jukebox will try to reconnect to the tablet automatically. If Spotify has been fully put to sleep and disappears as a device, open Spotify once and return here.</small>
+  <small>Playback now runs inside the JUKEBOX browser player. The Spotify Android app is not required for normal playback.</small>
 </div>
 </aside>
 <div class="msg" id="msg"></div>
@@ -440,6 +441,16 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 
 <script>
 const API='https://api.spotify.com/v1';
+const AUTH='https://accounts.spotify.com/authorize';
+const TOKEN='https://accounts.spotify.com/api/token';
+const WEB_AUTH_VERSION='v16-web-playback-1';
+const SCOPES=[
+ 'playlist-read-private','playlist-read-collaborative',
+ 'user-read-playback-state','user-read-currently-playing','user-modify-playback-state',
+ 'user-library-read','user-read-recently-played',
+ 'streaming','user-read-email','user-read-private'
+].join(' ');
+const redirectUri=location.origin+location.pathname;
 const $=id=>document.getElementById(id);
 const screens=[...document.querySelectorAll('.screen')];
 
@@ -461,6 +472,82 @@ function fmt(ms){ms=Math.max(0,ms||0);const s=Math.floor(ms/1000);return Math.fl
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function imgUrl(t){return t?.album?.images?.[0]?.url||t?.images?.[0]?.url||''}
 
+
+async function sha256(s){
+ return await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))
+}
+function b64url(buf){
+ return btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')
+}
+function rand(n=48){
+ const a=new Uint8Array(n);
+ crypto.getRandomValues(a);
+ return Array.from(a,b=>('0'+b.toString(16)).slice(-2)).join('')
+}
+async function beginWebPlaybackLogin(){
+ const clientId=localStorage.getItem('spotify_client_id');
+ if(!clientId)throw Error('Spotify Client ID is missing');
+ if(location.protocol==='file:')throw Error('Spotify login requires the hosted GitHub Pages address');
+
+ const verifier=rand(48);
+ sessionStorage.setItem('pkce_verifier',verifier);
+ const state=rand(16);
+ sessionStorage.setItem('oauth_state',state);
+ const challenge=b64url(await sha256(verifier));
+
+ const p=new URLSearchParams({
+  client_id:clientId,
+  response_type:'code',
+  redirect_uri:redirectUri,
+  scope:SCOPES,
+  code_challenge_method:'S256',
+  code_challenge:challenge,
+  state
+ });
+ location.href=AUTH+'?'+p.toString()
+}
+async function exchangeWebPlaybackCode(){
+ const q=new URLSearchParams(location.search);
+ const oauthError=q.get('error');
+ if(oauthError){
+  history.replaceState({},'',location.pathname);
+  throw Error('Spotify authorisation was cancelled')
+ }
+ const code=q.get('code');
+ if(!code)return false;
+
+ const state=q.get('state');
+ const expected=sessionStorage.getItem('oauth_state');
+ if(!expected||state!==expected)throw Error('Spotify login state mismatch');
+
+ const verifier=sessionStorage.getItem('pkce_verifier');
+ const clientId=localStorage.getItem('spotify_client_id');
+ if(!verifier||!clientId)throw Error('Spotify login session expired — reload and try again');
+
+ const body=new URLSearchParams({
+  client_id:clientId,
+  grant_type:'authorization_code',
+  code,
+  redirect_uri:redirectUri,
+  code_verifier:verifier
+ });
+ const r=await fetch(TOKEN,{
+  method:'POST',
+  headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  body
+ });
+ const text=await r.text();
+ if(!r.ok)throw Error('Spotify authorisation failed');
+ const data=text?JSON.parse(text):{};
+ saveTokens(data);
+ localStorage.setItem('spotify_auth_version',WEB_AUTH_VERSION);
+ sessionStorage.removeItem('pkce_verifier');
+ sessionStorage.removeItem('oauth_state');
+ history.replaceState({},'',location.pathname);
+ return true
+}
+
 function saveTokens(t){
   localStorage.setItem('spotify_access_token',t.access_token);
   if(t.refresh_token)localStorage.setItem('spotify_refresh_token',t.refresh_token);
@@ -471,7 +558,7 @@ async function refreshToken(){
   const cid=localStorage.getItem('spotify_client_id');
   if(!rt||!cid)throw Error('Reconnect Spotify');
   const body=new URLSearchParams({client_id:cid,grant_type:'refresh_token',refresh_token:rt});
-  const r=await fetch('https://accounts.spotify.com/api/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+  const r=await fetch(TOKEN,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   const text=await r.text();
   if(!r.ok)throw Error('Reconnect Spotify');
   const data=text?JSON.parse(text):{};
@@ -638,166 +725,222 @@ async function openCategory(index){
  }catch(e){toast(e.message)}
 }
 
-let targetDevice=localStorage.getItem('spotify_device_id')||'';
-let targetDeviceName=localStorage.getItem('spotify_device_name')||'';
-let lastDevices=[];
+let targetDevice='';
+let targetDeviceName='JUKEBOX';
+let webPlayer=null;
+let webDeviceId='';
+let webReady=false;
+let webInitPromise=null;
+let sdkLoadPromise=null;
+let webState=null;
+let webStateRefreshTimer=null;
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 
-function setVolumeSupport(dev){
- const supported=dev?.supports_volume===true;
+function setVolumeSupport(){
  const box=document.querySelector('.volbox');
- box?.classList.toggle('volume-disabled',!supported);
- $('volumeSlider').disabled=!supported;
- if(!supported){
-  $('volText').textContent='DEVICE';
-  $('volumeStatus').textContent='Volume: use the tablet / speaker controls for this playback device.'
- }else{
-  $('volumeStatus').textContent='Volume: controlled by Spotify on the selected device.'
+ box?.classList.remove('volume-disabled');
+ $('volumeSlider').disabled=false;
+ $('volumeStatus').textContent='Volume: controlled directly by the JUKEBOX browser player.'
+}
+
+function setDeviceIndicator(){
+ $('playingOn').textContent=webReady
+  ?'PLAYING ON · JUKEBOX · BROWSER'
+  :'PLAYING ON · JUKEBOX · Connecting…';
+ setVolumeSupport()
+}
+
+function loadSpotifySDK(){
+ if(window.Spotify?.Player)return Promise.resolve();
+ if(sdkLoadPromise)return sdkLoadPromise;
+ sdkLoadPromise=new Promise((resolve,reject)=>{
+  const oldReady=window.onSpotifyWebPlaybackSDKReady;
+  window.onSpotifyWebPlaybackSDKReady=()=>{
+   try{if(typeof oldReady==='function')oldReady()}catch{}
+   resolve()
+  };
+  const existing=[...document.scripts].find(s=>s.src==='https://sdk.scdn.co/spotify-player.js');
+  if(existing){
+   existing.addEventListener('error',()=>reject(Error('Spotify browser player failed to load')),{once:true});
+   return
+  }
+  const s=document.createElement('script');
+  s.src='https://sdk.scdn.co/spotify-player.js';
+  s.async=true;
+  s.onerror=()=>reject(Error('Spotify browser player failed to load'));
+  document.head.appendChild(s)
+ });
+ return sdkLoadPromise
+}
+
+async function waitForWebDevice(timeout=10000){
+ const started=Date.now();
+ while(Date.now()-started<timeout){
+  if(webReady&&webDeviceId)return webDeviceId;
+  await wait(100)
  }
+ throw Error('JUKEBOX browser player did not become ready')
 }
 
-function setDeviceIndicator(dev){
- if(dev){
-  $('playingOn').textContent='PLAYING ON · '+dev.name+(dev.is_active?' · ACTIVE':'');
-  setVolumeSupport(dev)
- }else{
-  $('playingOn').textContent='PLAYING ON · Spotify device unavailable';
-  setVolumeSupport(null)
+function applyWebState(state){
+ webState=state||null;
+ if(!state)return;
+ const t=state.track_window?.current_track;
+ if(!t)return;
+
+ const art=t.album?.images?.[0]?.url||'';
+ const artists=(t.artists||[]).map(a=>a.name).join(', ');
+ const paused=!!state.paused;
+ const pos=Number(state.position||0);
+ const dur=Number(state.duration||t.duration_ms||0);
+
+ $('miniTitle').textContent=t.name||'Nothing playing';
+ $('miniArtist').textContent=artists||'Spotify';
+ $('miniAlbum').textContent=t.album?.name||'';
+ $('playerTitle').textContent=t.name||'Nothing playing';
+ $('playerArtist').textContent=artists||'Spotify';
+ $('playerAlbum').textContent=t.album?.name||'';
+ $('miniArt').style.backgroundImage=art?`url("${art}")`:'none';
+ $('cover').style.backgroundImage=art?`url("${art}")`:'none';
+ $('miniPlay').textContent=paused?'▶':'Ⅱ';
+ $('bigPlay').textContent=paused?'▶':'Ⅱ';
+ $('curTime').textContent=fmt(pos);
+ $('durTime').textContent=fmt(dur);
+ $('seekSlider').value=dur?Math.round((pos/dur)*1000):0;
+ $('nowProgress').style.width=dur?Math.min(100,(pos/dur)*100)+'%':'0%';
+
+ if(t.uri)rememberRecentUri(t.uri)
+}
+
+async function createWebPlayer(){
+ await loadSpotifySDK();
+ if(webPlayer){
+  try{webPlayer.disconnect()}catch{}
+  webPlayer=null
  }
-}
+ webReady=false;
+ webDeviceId='';
+ setDeviceIndicator();
 
-async function fetchDevices(){
- const d=await api('/me/player/devices');
- const devices=(d?.devices||[]).filter(x=>!x.is_restricted);
- lastDevices=devices;
- return devices
-}
+ const startVol=Math.max(0,Math.min(100,Number(localStorage.getItem('jukebox_web_volume')||65)))/100;
+ webPlayer=new Spotify.Player({
+  name:'JUKEBOX',
+  getOAuthToken:cb=>{
+   token().then(t=>cb(t)).catch(e=>toast(e.message))
+  },
+  volume:startVol
+ });
 
-function chooseDevice(devices){
- let dev=devices.find(x=>x.id===targetDevice);
- if(!dev&&targetDeviceName)dev=devices.find(x=>x.name===targetDeviceName);
- if(!dev)dev=devices.find(x=>x.is_active)||devices[0];
- return dev||null
-}
+ webPlayer.addListener('ready',({device_id})=>{
+  webDeviceId=device_id;
+  targetDevice=device_id;
+  targetDeviceName='JUKEBOX';
+  webReady=true;
+  localStorage.setItem('spotify_device_id',device_id);
+  localStorage.setItem('spotify_device_name','JUKEBOX');
+  setDeviceIndicator();
+  $('deviceSelect').innerHTML='<option value="'+esc(device_id)+'" selected>JUKEBOX · browser player</option>';
+  $('deviceSelect').disabled=true;
+  webPlayer.getVolume().then(v=>{
+   const pct=Math.round(v*100);
+   $('volumeSlider').value=pct;
+   $('volText').textContent=pct+'%'
+  }).catch(()=>{});
+ });
 
-function rememberDevice(dev){
- if(!dev?.id)return;
- targetDevice=dev.id;
- targetDeviceName=dev.name||targetDeviceName||'';
- localStorage.setItem('spotify_device_id',targetDevice);
- if(targetDeviceName)localStorage.setItem('spotify_device_name',targetDeviceName)
-}
+ webPlayer.addListener('not_ready',()=>{
+  webReady=false;
+  setDeviceIndicator()
+ });
 
-async function loadDevices(){
- const devices=await fetchDevices();
- const selected=chooseDevice(devices);
- if(selected)rememberDevice(selected);
+ webPlayer.addListener('player_state_changed',state=>{
+  applyWebState(state);
+  clearTimeout(webStateRefreshTimer);
+  webStateRefreshTimer=setTimeout(()=>{
+   refreshQueueCount().catch(()=>{})
+  },300)
+ });
 
- const sel=$('deviceSelect');
- sel.innerHTML=devices.length
-  ?devices.map(x=>`<option value="${esc(x.id||'')}" ${(x.id===targetDevice)?'selected':''}>${esc(x.name)}${x.is_active?' • active':''}</option>`).join('')
-  :'<option value="">No controllable device found</option>';
- setDeviceIndicator(selected);
- return devices
-}
+ const sdkError=kind=>({message})=>{
+  console.error('Spotify '+kind+':',message);
+  toast(kind==='account error'?'Spotify Premium is required':message||('Spotify '+kind))
+ };
+ webPlayer.addListener('initialization_error',sdkError('initialization error'));
+ webPlayer.addListener('authentication_error',({message})=>{
+  console.error('Spotify authentication error:',message);
+  localStorage.removeItem('spotify_auth_version');
+  toast('Spotify needs to reconnect')
+ });
+ webPlayer.addListener('account_error',sdkError('account error'));
+ webPlayer.addListener('playback_error',sdkError('playback error'));
 
-$('deviceSelect').onchange=()=>{
- targetDevice=$('deviceSelect').value;
- const d=lastDevices.find(x=>x.id===targetDevice);
- targetDeviceName=d?.name||'';
- localStorage.setItem('spotify_device_id',targetDevice);
- if(targetDeviceName)localStorage.setItem('spotify_device_name',targetDeviceName);
- setDeviceIndicator(d||null);
- toast('Playback device selected')
-};
+ const connected=await webPlayer.connect();
+ if(connected===false)throw Error('JUKEBOX browser player could not connect');
+ await waitForWebDevice();
 
-$('reloadDevices').onclick=()=>loadDevices().catch(()=>setDeviceIndicator(null));
-
-async function tryCachedTransfer(){
- if(!targetDevice)return false;
+ // Make the browser player the active Spotify device without forcing playback.
  try{
   await api('/me/player',{
    method:'PUT',
    headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({device_ids:[targetDevice],play:false})
-  });
-  await wait(450);
-  return true
- }catch{
-  return false
+   body:JSON.stringify({device_ids:[webDeviceId],play:false})
+  })
+ }catch{}
+
+ setVolumeSupport();
+ return webDeviceId
+}
+
+async function initWebPlayer(force=false){
+ if(force){
+  webInitPromise=null;
+  if(webPlayer){try{webPlayer.disconnect()}catch{}}
+  webPlayer=null;webReady=false;webDeviceId=''
  }
+ if(webReady&&webDeviceId)return webDeviceId;
+ if(webInitPromise)return webInitPromise;
+ webInitPromise=createWebPlayer().catch(e=>{
+  webInitPromise=null;
+  webReady=false;
+  setDeviceIndicator();
+  throw e
+ });
+ return webInitPromise
 }
 
 async function ensureDevice(){
- // First try a normal fresh device lookup.
- let devices=[];
- try{devices=await fetchDevices()}catch{}
- let dev=chooseDevice(devices);
-
- // If Spotify has gone idle, try nudging the last known device back into the Connect session.
- if(!dev&&targetDevice){
-  await tryCachedTransfer();
-  try{devices=await fetchDevices()}catch{}
-  dev=chooseDevice(devices)
+ if(!webReady||!webDeviceId){
+  await initWebPlayer()
  }
+ targetDevice=webDeviceId;
+ return {id:webDeviceId,name:'JUKEBOX',is_active:true,supports_volume:true}
+}
 
- // A couple of short retries cover Spotify Connect taking a moment to reappear.
- for(let attempt=0;!dev&&attempt<2;attempt++){
-  await wait(650);
-  try{devices=await fetchDevices()}catch{}
-  dev=chooseDevice(devices)
- }
+async function loadDevices(){
+ await ensureDevice();
+ $('deviceSelect').innerHTML='<option value="'+esc(webDeviceId)+'" selected>JUKEBOX · browser player</option>';
+ $('deviceSelect').disabled=true;
+ setDeviceIndicator();
+ return [{id:webDeviceId,name:'JUKEBOX',is_active:true,supports_volume:true}]
+}
 
- if(!dev){
-  setDeviceIndicator(null);
-  throw Error('Spotify on the tablet is unavailable. Open Spotify once, then return to Jukebox.')
- }
+$('deviceSelect').onchange=()=>{};
+$('reloadDevices').onclick=async()=>{
+ try{
+  $('reloadDevices').disabled=true;
+  await initWebPlayer(true);
+  toast('JUKEBOX player ready')
+ }catch(e){toast(e.message)}
+ finally{$('reloadDevices').disabled=false}
+};
 
- rememberDevice(dev);
-
- // Transfer the current session to the tablet without unexpectedly starting a different track.
- if(!dev.is_active){
-  try{
-   await api('/me/player',{
-    method:'PUT',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({device_ids:[targetDevice],play:false})
-   });
-   await wait(300);
-   // Re-read once so the UI and supports_volume flag are current.
-   try{
-    const refreshed=await fetchDevices();
-    const current=chooseDevice(refreshed);
-    if(current){dev=current;rememberDevice(dev)}
-   }catch{}
-  }catch{
-   // One re-discovery attempt in case Spotify changed the device ID while idle.
-   try{
-    const refreshed=await fetchDevices();
-    const current=chooseDevice(refreshed);
-    if(current){
-     dev=current;rememberDevice(dev);
-     await api('/me/player',{
-      method:'PUT',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({device_ids:[targetDevice],play:false})
-     });
-     await wait(250)
-    }else throw Error('No device')
-   }catch{
-    setDeviceIndicator(null);
-    throw Error('Spotify on the tablet is unavailable. Open Spotify once, then return to Jukebox.')
-   }
-  }
- }
-
- setDeviceIndicator(dev);
- return dev
+function activateWebPlayer(){
+ try{webPlayer?.activateElement()}catch{}
 }
 
 function showDeviceRecovery(message){
- toast(message||'Spotify is not active on the tablet');
+ toast(message||'JUKEBOX browser player is reconnecting');
  $('settingsPanel').classList.add('open');
  openDrawer()
 }
@@ -843,11 +986,13 @@ async function playTrackList(tracks,label){
  }catch(e){showDeviceRecovery(e.message)}
 }
 function playCategoryRandom(){
+ activateWebPlayer();
  if(!currentMixTracks.length)return;
  const mix=makeMixedOrder(currentMixTracks,'',15);
  playTrackList(mix,currentMixName)
 }
 function playSelectedMix(){
+ activateWebPlayer();
  if(!pickedUri||!currentMixTracks.length)return;
  const mix=makeMixedOrder(currentMixTracks,pickedUri,15);
  playTrackList(mix,currentMixName)
@@ -880,7 +1025,7 @@ async function addToQueue(uri){
   refreshQueueCount().catch(()=>{})
  }catch(e){showDeviceRecovery(e.message)}
 }
-$('playNowBtn').onclick=()=>{if(!pickedUri)return;const uri=pickedUri;closeTrackPick();playUri(uri)};
+$('playNowBtn').onclick=()=>{activateWebPlayer();if(!pickedUri)return;const uri=pickedUri;closeTrackPick();playUri(uri)};
 $('addQueueBtn').onclick=()=>{if(!pickedUri)return;addToQueue(pickedUri)};
 
 async function refreshPlayer(){
@@ -918,54 +1063,78 @@ async function refreshPlayer(){
  $('seekSlider').value=t.duration_ms?Math.round((s.progress_ms/t.duration_ms)*1000):0;
  $('nowProgress').style.width=t.duration_ms?Math.min(100,(s.progress_ms/t.duration_ms)*100)+'%':'0%';
 
- if(s.device){
-  targetDevice=s.device.id||targetDevice;
-  targetDeviceName=s.device.name||targetDeviceName;
-  if(targetDevice)localStorage.setItem('spotify_device_id',targetDevice);
-  if(targetDeviceName)localStorage.setItem('spotify_device_name',targetDeviceName);
-  setDeviceIndicator(s.device)
- }
- if(s.device){
-  setVolumeSupport(s.device);
-  if(s.device.supports_volume===true&&s.device.volume_percent!=null){
-   $('volumeSlider').value=s.device.volume_percent;
-   $('volText').textContent=s.device.volume_percent+'%'
-  }
+ if(webReady&&webDeviceId){
+  targetDevice=webDeviceId;
+  targetDeviceName='JUKEBOX';
+  setDeviceIndicator()
  }
 }
 
 
 async function togglePlay(){
+ activateWebPlayer();
  await ensureDevice();
- const s=await api('/me/player');
- await api(s?.is_playing?'/me/player/pause':'/me/player/play',{method:'PUT'});
- setTimeout(refreshPlayer,250)
+ if(!webPlayer)throw Error('JUKEBOX browser player is not ready');
+ await webPlayer.togglePlay();
+ setTimeout(()=>refreshPlayer().catch(()=>{}),250)
 }
-$('miniPlay').onclick=e=>{e.stopPropagation();togglePlay().catch(e=>toast(e.message))};
-$('bigPlay').onclick=()=>togglePlay().catch(e=>toast(e.message));
-async function command(c){await ensureDevice();await api(c==='prev'?'/me/player/previous':'/me/player/next',{method:'POST'});setTimeout(refreshPlayer,300)}
-document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=e=>{e.stopPropagation();command(b.dataset.cmd).catch(e=>toast(e.message))});
-$('refreshPlayer').onclick=()=>refreshPlayer().catch(e=>toast(e.message));
+$('miniPlay').onclick=e=>{
+ e.stopPropagation();
+ activateWebPlayer();
+ togglePlay().catch(e=>toast(e.message))
+};
+$('bigPlay').onclick=()=>{
+ activateWebPlayer();
+ togglePlay().catch(e=>toast(e.message))
+};
+async function command(c){
+ activateWebPlayer();
+ await ensureDevice();
+ if(c==='prev')await webPlayer.previousTrack();
+ else await webPlayer.nextTrack();
+ setTimeout(()=>refreshPlayer().catch(()=>{}),300)
+}
+document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=e=>{
+ e.stopPropagation();
+ activateWebPlayer();
+ command(b.dataset.cmd).catch(e=>toast(e.message))
+});
+$('refreshPlayer').onclick=async()=>{
+ try{
+  await ensureDevice();
+  const state=await webPlayer.getCurrentState();
+  if(state)applyWebState(state);
+  await refreshPlayer()
+ }catch(e){toast(e.message)}
+};
 
 let vt;
 $('volumeSlider').oninput=()=>{
- if($('volumeSlider').disabled)return;
- $('volText').textContent=$('volumeSlider').value+'%';
+ const pct=Number($('volumeSlider').value||0);
+ $('volText').textContent=pct+'%';
+ localStorage.setItem('jukebox_web_volume',String(pct));
  clearTimeout(vt);
  vt=setTimeout(async()=>{
   try{
-   const dev=await ensureDevice();
-   if(dev?.supports_volume!==true){
-    setVolumeSupport(dev);
-    return
-   }
-   await api('/me/player/volume?volume_percent='+$('volumeSlider').value+(targetDevice?'&device_id='+encodeURIComponent(targetDevice):''),{method:'PUT'})
+   await ensureDevice();
+   await webPlayer.setVolume(Math.max(0,Math.min(100,pct))/100)
   }catch(e){toast(e.message)}
- },180)
+ },80)
 };
-$('seekSlider').onchange=async()=>{const s=await api('/me/player');if(!s?.item)return;const pos=Math.round(($('seekSlider').value/1000)*s.item.duration_ms);await api('/me/player/seek?position_ms='+pos,{method:'PUT'});refreshPlayer()};
-$('shuffleBtn').onclick=async()=>{const s=await api('/me/player');await api('/me/player/shuffle?state='+(!s.shuffle_state),{method:'PUT'});toast('Shuffle '+(!s.shuffle_state?'on':'off'))};
-$('repeatBtn').onclick=async()=>{const s=await api('/me/player');const n=s.repeat_state==='off'?'context':'off';await api('/me/player/repeat?state='+n,{method:'PUT'});toast('Repeat '+n)};
+$('seekSlider').onchange=async()=>{
+ try{
+  activateWebPlayer();
+  await ensureDevice();
+  const state=await webPlayer.getCurrentState();
+  if(!state)return;
+  const dur=Number(state.duration||0);
+  const pos=Math.round((Number($('seekSlider').value)/1000)*dur);
+  await webPlayer.seek(pos);
+  setTimeout(()=>refreshPlayer().catch(()=>{}),150)
+ }catch(e){toast(e.message)}
+};
+$('shuffleBtn').onclick=async()=>{activateWebPlayer();await ensureDevice();const s=await api('/me/player');await api('/me/player/shuffle?state='+(!s.shuffle_state)+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'});toast('Shuffle '+(!s.shuffle_state?'on':'off'))};
+$('repeatBtn').onclick=async()=>{activateWebPlayer();await ensureDevice();const s=await api('/me/player');const n=s.repeat_state==='off'?'context':'off';await api('/me/player/repeat?state='+n+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'});toast('Repeat '+n)};
 async function refreshQueueCount(){
  try{
   const d=await api('/me/player/queue');
@@ -1007,7 +1176,7 @@ $('drawerHome').onclick=()=>{closeDrawer();showScreen('home')};
 $('drawerNow').onclick=()=>{closeDrawer();showScreen('player')};
 $('drawerQueue').onclick=()=>{closeDrawer();openQueue()};
 $('settingsToggle').onclick=()=>{$('settingsPanel').classList.toggle('open')};
-$('logoutBtn').onclick=()=>{['spotify_access_token','spotify_refresh_token','spotify_expires_at','spotify_device_id','spotify_device_name'].forEach(k=>localStorage.removeItem(k));location.reload()};
+$('logoutBtn').onclick=()=>{try{webPlayer?.disconnect()}catch{};['spotify_access_token','spotify_refresh_token','spotify_expires_at','spotify_device_id','spotify_device_name','spotify_auth_version'].forEach(k=>localStorage.removeItem(k));location.reload()};
 
 function syncFullscreenButton(){
  const on=!!document.fullscreenElement;
@@ -1080,17 +1249,53 @@ async function requestWakeLock(){
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='visible'){
   requestWakeLock();
-  loadDevices().catch(()=>setDeviceIndicator(null));
-  setTimeout(()=>refreshPlayer().catch(()=>{}),350)
+  if(webPlayer&&!webReady)webPlayer.connect().catch(()=>{});
+  setTimeout(async()=>{
+   try{
+    await ensureDevice();
+    const state=await webPlayer.getCurrentState();
+    if(state)applyWebState(state);
+    await refreshPlayer()
+   }catch{}
+  },350)
  }
 });
 requestWakeLock();
 
-renderCategories();
-loadDevices().catch(()=>setDeviceIndicator(null));
-refreshPlayer().catch(()=>{});
-setInterval(()=>refreshPlayer().catch(()=>{}),5000);
-refreshQueueCount().catch(()=>{});setInterval(()=>refreshQueueCount().catch(()=>{}),30000);
+async function bootJukeboxV16(){
+ renderCategories();
+
+ // First return from the one-time expanded Spotify authorisation.
+ const exchanged=await exchangeWebPlaybackCode();
+
+ // Existing v15 tokens do not contain the Web Playback streaming permissions.
+ // On the first v16 load, obtain the expanded scopes once and return here.
+ if(!exchanged && localStorage.getItem('spotify_auth_version')!==WEB_AUTH_VERSION){
+  await beginWebPlaybackLogin();
+  return
+ }
+
+ if(!localStorage.getItem('spotify_access_token')){
+  await beginWebPlaybackLogin();
+  return
+ }
+
+ try{
+  await initWebPlayer();
+  await loadDevices();
+  const state=await webPlayer.getCurrentState();
+  if(state)applyWebState(state);
+  await refreshPlayer().catch(()=>{});
+  await refreshQueueCount().catch(()=>{})
+ }catch(e){
+  toast(e.message);
+  $('settingsPanel').classList.add('open')
+ }
+
+ setInterval(()=>refreshPlayer().catch(()=>{}),5000);
+ setInterval(()=>refreshQueueCount().catch(()=>{}),30000)
+}
+bootJukeboxV16().catch(e=>toast(e.message));
 </script>
 </body>
 </html>
