@@ -319,7 +319,7 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 .settings-panel.open{display:block}
 .trackpick-actions .primary{background:linear-gradient(180deg,#3a2a10,#211507);box-shadow:0 0 14px rgba(211,164,75,.18);font-size:16px}
 
-/* v17 search modes */
+/* v19 search modes */
 .searcharea{grid-template-rows:auto auto minmax(0,1fr)}
 .search-modes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
 .search-mode{height:32px;border:1px solid #4b3920;border-radius:6px;background:#0a0a0a;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.7px;padding:0 3px}
@@ -332,6 +332,15 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 .player-log.open{display:block}
 #playerLogToggle{font-size:10px}
 
+/* v19 curated genre browser */
+.genre-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px}
+.genre-card{min-height:58px;border:1px solid #4b3920;border-radius:8px;background:linear-gradient(180deg,#15110b,#090909);color:var(--gold2);padding:8px;text-align:left;font-weight:900;font-size:11px;letter-spacing:.5px}
+.genre-card span{display:block;color:var(--muted);font-size:8px;font-weight:600;letter-spacing:0;margin-top:4px;line-height:1.25}
+.genre-result-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-bottom:1px solid #322617;background:#0d0b08;position:sticky;top:0;z-index:2}
+.genre-result-head button{height:32px;border:1px solid #4b3920;border-radius:6px;background:#171109;color:var(--gold2);font-size:9px;font-weight:800;padding:0 9px}
+.genre-result-head b{display:block;color:var(--gold2);font-size:11px}
+.genre-result-head span{display:block;color:var(--muted);font-size:8px;margin-top:2px}
+@media(max-width:720px){.genre-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .trackpick-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;display:none;align-items:center;justify-content:center;padding:18px}
 .trackpick-overlay.show{display:flex}
@@ -716,6 +725,84 @@ function bindSearchEntities(target){
  target.querySelectorAll('[data-artistid]').forEach(b=>b.onclick=()=>openSearchArtist(b.dataset.artistid));
  target.querySelectorAll('[data-albumid]').forEach(b=>b.onclick=()=>openSearchAlbum(b.dataset.albumid))
 }
+const GENRE_LIBRARY=[
+ {name:'HEAVY METAL',sub:'Classic heavy metal',artists:['Black Sabbath','Iron Maiden','Judas Priest','Dio','Ozzy Osbourne','Motörhead','Accept','Saxon']},
+ {name:'THRASH METAL',sub:'Fast, aggressive metal',artists:['Metallica','Megadeth','Slayer','Anthrax','Testament','Exodus','Kreator','Overkill']},
+ {name:'GROOVE METAL',sub:'Heavy riffs and groove',artists:['Pantera','Lamb of God','Machine Head','Sepultura','DevilDriver','Chimaira','Prong','Soulfly']},
+ {name:'NU METAL',sub:'90s / 00s alternative metal',artists:['System Of A Down','Korn','Slipknot','Deftones','Limp Bizkit','Linkin Park','Mudvayne','Disturbed']},
+ {name:'DOOM METAL',sub:'Slow, dark and heavy',artists:['Candlemass','Electric Wizard','Saint Vitus','Cathedral','Sleep','Pallbearer','Trouble','Pentagram']},
+ {name:'DEATH METAL',sub:'Extreme metal',artists:['Death','Obituary','Morbid Angel','Cannibal Corpse','Entombed','Carcass','Bolt Thrower','At The Gates']},
+ {name:'PROG METAL',sub:'Progressive and technical',artists:['Tool','Dream Theater','Gojira','Mastodon','Opeth','Porcupine Tree','Meshuggah','Haken']},
+ {name:'METALCORE',sub:'Modern metal / hardcore',artists:['Killswitch Engage','Trivium','Parkway Drive','Architects','Bullet For My Valentine','Avenged Sevenfold','As I Lay Dying','August Burns Red']},
+ {name:'STONER / SLUDGE',sub:'Fuzz, weight and groove',artists:['Kyuss','Sleep','High on Fire','Down','Clutch','Melvins','Crowbar','Baroness']},
+ {name:'CLASSIC ROCK',sub:'60s–80s rock staples',artists:['Led Zeppelin','Deep Purple','AC/DC','Thin Lizzy','The Who','Aerosmith','ZZ Top','Free']},
+ {name:'HARD ROCK',sub:'Big riffs and hooks',artists:["Guns N' Roses",'Audioslave','Alter Bridge','Velvet Revolver','Royal Blood','Wolfmother','Rival Sons','The Cult']},
+ {name:'GRUNGE',sub:'Seattle and 90s heavy rock',artists:['Nirvana','Pearl Jam','Soundgarden','Alice In Chains','Stone Temple Pilots','Mudhoney','Screaming Trees','Temple Of The Dog']},
+ {name:'ALTERNATIVE ROCK',sub:'Alternative / left-field rock',artists:['Radiohead','The Smashing Pumpkins','Pixies','Faith No More','Incubus','Muse','Garbage','Bush']},
+ {name:'PUNK',sub:'Punk and melodic punk',artists:['The Clash','Ramones','Sex Pistols','Bad Religion','NOFX','The Offspring','Rancid','Dead Kennedys']},
+ {name:'PROG ROCK',sub:'Progressive rock',artists:['Pink Floyd','Rush','Yes','King Crimson','Genesis','Porcupine Tree','Jethro Tull','Emerson, Lake & Palmer']}
+];
+
+function renderGenreBrowser(){
+ currentMixTracks=[];
+ currentMixName='';
+ $('searchResults').innerHTML=
+  '<div class="search-section-title">CHOOSE A GENRE</div>'+
+  '<div class="genre-grid">'+GENRE_LIBRARY.map((g,i)=>
+   `<button class="genre-card" data-genreindex="${i}">${esc(g.name)}<span>${esc(g.sub)}</span></button>`
+  ).join('')+'</div>';
+ $('searchResults').querySelectorAll('[data-genreindex]').forEach(b=>{
+  b.onclick=()=>openGenre(Number(b.dataset.genreindex))
+ })
+}
+
+async function openGenre(index){
+ const g=GENRE_LIBRARY[index];if(!g)return;
+ const seq=++searchSeq;
+ currentMixTracks=[];
+ currentMixName=g.name;
+ $('searchResults').innerHTML='<div class="search-empty">Building a varied '+esc(g.name)+' selection…</div>';
+ try{
+  const artists=shuffleCopy(g.artists);
+  const buckets=[];
+  for(let i=0;i<artists.length;i+=4){
+   const batch=artists.slice(i,i+4);
+   const found=await Promise.all(batch.map(a=>tracksForArtistName(a,1).catch(()=>[])));
+   found.forEach((tracks,j)=>buckets.push({artist:batch[j],tracks:shuffleCopy(tracks)}));
+   await wait(60)
+  }
+  if(seq!==searchSeq)return;
+
+  const tracks=[],seen=new Set();
+  for(let round=0;round<3;round++){
+   for(const b of buckets){
+    const t=b.tracks[round];
+    const k=t?normTrackKey(t):'';
+    if(t?.uri&&!seen.has(k)){seen.add(k);tracks.push(t)}
+   }
+  }
+  currentMixTracks=tracks;
+  currentMixName=g.name;
+  tracks.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
+  const artistCount=new Set(tracks.map(t=>String(t?.artists?.[0]?.name||''))).size;
+  $('searchResults').innerHTML=
+   `<div class="genre-result-head">
+      <button id="genreBackBtn">‹ GENRES</button>
+      <div><b>${esc(g.name)}</b><span>${tracks.length} tracks · ${artistCount} artists</span></div>
+      <button id="genreRandomBtn">⤨ PLAY RANDOM</button>
+    </div>`+
+   (tracks.length?trackRowsHtml(tracks):'<div class="search-empty">No tracks found for this genre.</div>');
+  bindTrackRows($('searchResults'));
+  $('genreBackBtn').onclick=renderGenreBrowser;
+  $('genreRandomBtn').onclick=()=>playCategoryRandom()
+ }catch(e){
+  if(seq===searchSeq){
+   $('searchResults').innerHTML='<div class="search-empty">Could not build this genre right now.</div>';
+   toast(e.message)
+  }
+ }
+}
+
 function setSearchMode(mode,rerun=true){
  searchMode=mode;
  document.querySelectorAll('.search-mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
@@ -723,13 +810,20 @@ function setSearchMode(mode,rerun=true){
   all:'Search music…',
   track:'Search track title…',
   artist:'Search artist…',
-  album:'Search album…',
-  genre:'Search genre e.g. grunge, thrash metal…'
+  album:'Search album…'
  };
+ if(mode==='genre'){
+  $('searchInput').value='';
+  $('searchInput').style.display='none';
+  renderGenreBrowser();
+  return
+ }
+ $('searchInput').style.display='';
  $('searchInput').placeholder=placeholders[mode]||placeholders.all;
  if(rerun){
   const q=$('searchInput').value.trim();
   if(q.length>=2)runSearch(q)
+  else $('searchResults').innerHTML=''
  }
 }
 function addSearchBack(label){
@@ -777,21 +871,6 @@ async function tracksForArtistName(name,pages=2){
  const wanted=String(name||'').toLowerCase();
  return dedupeTracks(raw.filter(t=>(t.artists||[]).some(a=>String(a.name||'').toLowerCase()===wanted)))
 }
-async function genreResults(q){
- // Spotify's direct genre->track search can be very noisy. Resolve the genre to artists first,
- // then build the playable list only from those returned artists.
- const gq=spotifyField('genre',q);
- const d=await api('/search?type=artist&limit=10&q='+encodeURIComponent(gq));
- const artists=d?.artists?.items||[];
- if(!artists.length)return {artists:[],tracks:[]};
- const chosen=artists.slice(0,6);
- const buckets=await Promise.all(chosen.map(a=>tracksForArtistName(a.name,1).catch(()=>[])));
- const tracks=[];
- for(let round=0;round<2;round++){
-  for(const bucket of buckets){if(bucket[round])tracks.push(bucket[round])}
- }
- return {artists,tracks:dedupeTracks(tracks)}
-}
 
 async function runSearch(q){
  q=String(q||'').trim();
@@ -809,18 +888,6 @@ async function runSearch(q){
    currentMixTracks=tracks;currentMixName='TRACK SEARCH';
    renderTracks(tracks,$('searchResults'));
    if(!tracks.length)$('searchResults').innerHTML='<div class="search-empty">No track-title matches found.</div>';
-   return
-  }
-  if(searchMode==='genre'){
-   const result=await genreResults(q);
-   if(seq!==searchSeq)return;
-   currentMixTracks=result.tracks;currentMixName=q.toUpperCase();
-   let out='';
-   if(result.artists.length)out+='<div class="search-section-title">ARTISTS IN '+esc(q.toUpperCase())+'</div>'+artistRowsHtml(result.artists);
-   if(result.tracks.length)out+='<div class="search-section-title">TRACKS FROM THOSE ARTISTS</div>'+trackRowsHtml(result.tracks);
-   $('searchResults').innerHTML=out||'<div class="search-empty">No Spotify artists found for that genre. Try a broader genre name.</div>';
-   result.tracks.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
-   bindSearchEntities($('searchResults'));
    return
   }
   if(searchMode==='artist'){
@@ -949,6 +1016,10 @@ let webState=null;
 let webStateRefreshTimer=null;
 let recoveryPromise=null;
 let playerPhase='CONNECTING';
+let webBackendVerified=false;
+let lastBackendDeviceCheck=0;
+let lastBackendDeviceId='';
+const BACKEND_DEVICE_TTL=8000;
 let ignoreNotReadyUntil=0;
 let userPaused=false;
 let suppressAutoResumeUntil=0;
@@ -992,18 +1063,79 @@ function setVolumeSupport(){
  $('volumeStatus').textContent='Volume: controlled directly by the JUKEBOX browser player.'
 }
 function setDeviceIndicator(){
- if(webReady)setPlayerPhase('READY');
+ if(webReady&&webBackendVerified)setPlayerPhase('READY');
  else if(playerPhase!=='RECONNECTING'&&playerPhase!=='ERROR')setPlayerPhase('CONNECTING');
  setVolumeSupport()
 }
-async function isWebPlayerHealthy(){
+async function fetchSpotifyDevices(){
+ const d=await api('/me/player/devices');
+ return (d?.devices||[]).filter(x=>x?.id&&!x.is_restricted)
+}
+async function spotifyDeviceById(id=webDeviceId){
+ if(!id)return null;
+ const devices=await fetchSpotifyDevices();
+ return devices.find(d=>d.id===id)||null
+}
+async function waitForSpotifyDevice(id=webDeviceId,timeout=9000){
+ if(!id)throw Error('JUKEBOX has no Spotify device ID');
+ const started=Date.now();
+ while(Date.now()-started<timeout){
+  try{
+   const dev=await spotifyDeviceById(id);
+   if(dev){
+    webBackendVerified=true;
+    lastBackendDeviceCheck=Date.now();
+    lastBackendDeviceId=id;
+    return dev
+   }
+  }catch(e){
+   if(/401|reconnect/i.test(String(e?.message||'')))throw e
+  }
+  await wait(350)
+ }
+ webBackendVerified=false;
+ throw Error('JUKEBOX device did not register with Spotify')
+}
+async function transferToWebDevice(id=webDeviceId){
+ if(!id)throw Error('JUKEBOX has no Spotify device ID');
+ await api('/me/player',{
+  method:'PUT',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({device_ids:[id],play:false})
+ });
+ const dev=await waitForSpotifyDevice(id,5000);
+ webBackendVerified=true;
+ lastBackendDeviceCheck=Date.now();
+ lastBackendDeviceId=id;
+ return dev
+}
+async function isWebPlayerHealthy(forceBackend=false){
  if(!webPlayer||!webReady||!webDeviceId)return false;
  try{
-  await withTimeout(webPlayer.getVolume(),1800,'JUKEBOX player did not respond');
-  return true
- }catch{return false}
-}
+  await withTimeout(webPlayer.getVolume(),1800,'JUKEBOX player did not respond')
+ }catch{
+  webBackendVerified=false;
+  return false
+ }
 
+ const cacheFresh=
+  !forceBackend &&
+  webBackendVerified &&
+  lastBackendDeviceId===webDeviceId &&
+  Date.now()-lastBackendDeviceCheck<BACKEND_DEVICE_TTL;
+ if(cacheFresh)return true;
+
+ try{
+  const dev=await spotifyDeviceById(webDeviceId);
+  webBackendVerified=!!dev;
+  lastBackendDeviceCheck=Date.now();
+  lastBackendDeviceId=dev?webDeviceId:'';
+  return !!dev
+ }catch{
+  webBackendVerified=false;
+  return false
+ }
+}
 function loadSpotifySDK(){
  if(window.Spotify?.Player)return Promise.resolve();
  if(sdkLoadPromise)return sdkLoadPromise;
@@ -1137,10 +1269,13 @@ async function createWebPlayer(){
   targetDevice=device_id;
   targetDeviceName='JUKEBOX';
   webReady=true;
+  webBackendVerified=false;
+  lastBackendDeviceCheck=0;
+  lastBackendDeviceId='';
   localStorage.setItem('spotify_device_id',device_id);
   localStorage.setItem('spotify_device_name','JUKEBOX');
-  setDeviceIndicator();
-  logPlayerEvent('READY','Device '+device_id.slice(0,8));
+  setPlayerPhase('CONNECTING','REGISTERING');
+  logPlayerEvent('SDK READY','Device '+device_id.slice(0,8));
   $('deviceSelect').innerHTML='<option value="'+esc(device_id)+'" selected>JUKEBOX · browser player</option>';
   $('deviceSelect').disabled=true;
   webPlayer.getVolume().then(v=>{
@@ -1153,6 +1288,9 @@ async function createWebPlayer(){
  webPlayer.addListener('not_ready',({device_id}={})=>{
   const shouldResume=!!webState&&!webState.paused&&!userPaused&&document.visibilityState==='visible';
   webReady=false;
+  webBackendVerified=false;
+  lastBackendDeviceCheck=0;
+  lastBackendDeviceId='';
   setPlayerPhase('RECONNECTING');
   logPlayerEvent('NOT READY',device_id?('Device '+device_id.slice(0,8)):'SDK disconnected');
   if(Date.now()<ignoreNotReadyUntil)return;
@@ -1201,15 +1339,15 @@ async function createWebPlayer(){
  if(connected===false)throw Error('JUKEBOX browser player could not connect');
  await waitForWebDevice();
 
- // Make the browser player the active Spotify device without forcing playback.
- try{
-  await api('/me/player',{
-   method:'PUT',
-   headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({device_ids:[webDeviceId],play:false})
-  })
- }catch{}
+ // SDK-ready is not enough: Spotify Connect must know this exact device ID.
+ await waitForSpotifyDevice(webDeviceId,9000);
 
+ // Make that verified browser device the active target. A failed transfer is a real failure.
+ await transferToWebDevice(webDeviceId);
+
+ if(!await isWebPlayerHealthy(true))throw Error('JUKEBOX device is not available to Spotify');
+ setPlayerPhase('READY');
+ logPlayerEvent('READY','Verified '+webDeviceId.slice(0,8));
  setVolumeSupport();
  return webDeviceId
 }
@@ -1219,7 +1357,8 @@ async function initWebPlayer(force=false){
   webInitPromise=null;
   ignoreNotReadyUntil=Date.now()+1800;
   if(webPlayer){try{webPlayer.disconnect()}catch{}}
-  webPlayer=null;webReady=false;webDeviceId=''
+  webPlayer=null;webReady=false;webDeviceId='';
+  webBackendVerified=false;lastBackendDeviceCheck=0;lastBackendDeviceId=''
  }
  if(webReady&&webDeviceId&&await isWebPlayerHealthy())return webDeviceId;
  if(webInitPromise)return webInitPromise;
@@ -1251,31 +1390,29 @@ async function recoverWebPlayer(reason='Player check',forceHard=false){
      if(connected===false)throw Error('Reconnect rejected');
      await waitForWebDevice(3500)
     }
-    if(await isWebPlayerHealthy()){
+
+    // Force a real Spotify Connect check. Local SDK responsiveness alone is not enough.
+    if(await isWebPlayerHealthy(true)){
+     await transferToWebDevice(webDeviceId);
+     if(!await isWebPlayerHealthy(true))throw Error('Spotify dropped the JUKEBOX device');
+     targetDevice=webDeviceId;
      setPlayerPhase('READY');
-     logPlayerEvent('RECOVERED','Existing player');
+     logPlayerEvent('RECOVERED','Existing verified player');
      return webDeviceId
     }
+    logPlayerEvent('STALE DEVICE','Spotify no longer lists '+(webDeviceId?webDeviceId.slice(0,8):'unknown'))
    }catch(e){
     logPlayerEvent('SOFT RECOVERY FAILED',e.message)
    }
   }
 
+  // Full rebuild: discard the stale SDK instance and obtain a brand-new Spotify device ID.
   await initWebPlayer(true);
-  if(!await isWebPlayerHealthy())throw Error('Fresh JUKEBOX player is not responding');
-
-  // Re-register the fresh device as the active Spotify target, without forcing a song.
-  try{
-   await api('/me/player',{
-    method:'PUT',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({device_ids:[webDeviceId],play:false})
-   })
-  }catch(e){logPlayerEvent('TRANSFER WARNING',e.message)}
+  if(!await isWebPlayerHealthy(true))throw Error('Fresh JUKEBOX player is not registered with Spotify');
 
   targetDevice=webDeviceId;
   setPlayerPhase('READY');
-  logPlayerEvent('RECOVERED','Fresh player');
+  logPlayerEvent('RECOVERED','Fresh verified player');
   return webDeviceId
  })();
 
@@ -1284,8 +1421,11 @@ async function recoverWebPlayer(reason='Player check',forceHard=false){
 }
 
 async function ensureDevice(){
- if(!await isWebPlayerHealthy()){
-  await recoverWebPlayer('Health check',false)
+ if(!await isWebPlayerHealthy(false)){
+  await recoverWebPlayer('Device verification',false)
+ }
+ if(!webBackendVerified){
+  await recoverWebPlayer('Spotify device missing',true)
  }
  targetDevice=webDeviceId;
  return {id:webDeviceId,name:'JUKEBOX',is_active:true,supports_volume:true}
@@ -1299,6 +1439,7 @@ async function runPlaybackAction(label,action){
  }catch(first){
   logPlayerEvent(label+' FAILED',first.message);
   await recoverWebPlayer(label,true);
+  await ensureDevice();
   try{
    const result=await action();
    logPlayerEvent(label+' RETRY','Succeeded');
@@ -1323,7 +1464,7 @@ $('deviceSelect').onchange=()=>{};
 $('reloadDevices').onclick=async()=>{
  try{
   $('reloadDevices').disabled=true;
-  await initWebPlayer(true);
+  await recoverWebPlayer('Manual player refresh',true);
   toast('JUKEBOX player ready')
  }catch(e){toast(e.message)}
  finally{$('reloadDevices').disabled=false}
@@ -1565,6 +1706,7 @@ let st;
 document.querySelectorAll('.search-mode').forEach(b=>b.onclick=()=>setSearchMode(b.dataset.mode));
 setSearchMode('all',false);
 $('searchInput').oninput=()=>{
+ if(searchMode==='genre')return;
  clearTimeout(st);
  const q=$('searchInput').value.trim();
  if(q.length<2){searchSeq++;$('searchResults').innerHTML='';return}
@@ -1674,14 +1816,14 @@ document.addEventListener('visibilitychange',()=>{
 window.addEventListener('pageshow',()=>recoverAfterWake('Page restored'));
 requestWakeLock();
 
-async function bootJukeboxV17(){
+async function bootJukeboxV19(){
  renderCategories();
 
  // First return from the one-time expanded Spotify authorisation.
  const exchanged=await exchangeWebPlaybackCode();
 
  // Existing v15 tokens do not contain the Web Playback streaming permissions.
- // Existing Web Playback authorisation is reused; no new scopes are required for v17.
+ // Existing Web Playback authorisation is reused; no new scopes are required for v19.
  if(!exchanged && localStorage.getItem('spotify_auth_version')!==WEB_AUTH_VERSION){
   await beginWebPlaybackLogin();
   return
@@ -1707,7 +1849,7 @@ async function bootJukeboxV17(){
  setInterval(()=>refreshPlayer().catch(()=>{}),5000);
  setInterval(()=>refreshQueueCount().catch(()=>{}),30000)
 }
-bootJukeboxV17().catch(e=>{logPlayerEvent("BOOT FAILED",e.message);toast(e.message)});
+bootJukeboxV19().catch(e=>{logPlayerEvent("BOOT FAILED",e.message);toast(e.message)});
 </script>
 </body>
 </html>
