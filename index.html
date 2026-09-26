@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png">
-<!-- Jukebox v16: Web Playback SDK engine; v12/v15 visuals preserved -->
+<!-- Jukebox v17: search + resilient Web Playback recovery; v12/v15 visuals preserved -->
 <title>Jukebox</title>
 <style>
 :root{
@@ -318,8 +318,20 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 .settings-panel{display:none;padding-top:2px;border-top:1px solid #2d2418;margin-top:3px}
 .settings-panel.open{display:block}
 .trackpick-actions .primary{background:linear-gradient(180deg,#3a2a10,#211507);box-shadow:0 0 14px rgba(211,164,75,.18);font-size:16px}
-.dim-overlay{position:fixed;inset:0;background:rgba(0,0,0,.58);opacity:0;pointer-events:none;z-index:45;transition:opacity .5s}
-.dim-overlay.on{opacity:1}
+
+/* v17 search modes */
+.searcharea{grid-template-rows:auto auto minmax(0,1fr)}
+.search-modes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+.search-mode{height:32px;border:1px solid #4b3920;border-radius:6px;background:#0a0a0a;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.7px;padding:0 3px}
+.search-mode.active{border-color:var(--gold);background:#221707;color:var(--gold2);box-shadow:inset 0 0 10px rgba(211,164,75,.08)}
+.search-section-title{padding:8px 10px 5px;color:var(--gold2);font-size:10px;font-weight:800;letter-spacing:1.4px;border-bottom:1px solid #211d16;background:#0d0b08}
+.search-back{width:100%;height:34px;border:0;border-bottom:1px solid #3b2d19;background:#171109;color:var(--gold2);font-size:10px;font-weight:800;text-align:left;padding:0 10px}
+.entity-row .dur{font-weight:700;color:var(--gold2)}
+.search-empty{padding:18px;color:var(--muted);font-size:12px;text-align:center}
+.player-log{display:none;max-height:120px;overflow:auto;white-space:pre-wrap;margin:5px 0 4px;padding:7px;border:1px solid #322617;border-radius:5px;background:#050505;color:#bda980;font:9px/1.35 monospace}
+.player-log.open{display:block}
+#playerLogToggle{font-size:10px}
+
 
 .trackpick-overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;display:none;align-items:center;justify-content:center;padding:18px}
 .trackpick-overlay.show{display:flex}
@@ -371,7 +383,17 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
 
 <section id="search" class="screen"><div class="subscreen">
 <div class="subhead"><button class="back" data-screen="home">‹ BACK</button><h2>SEARCH</h2><span></span></div>
-<div class="searcharea"><input id="searchInput" class="searchinput" placeholder="Search tracks or artists…"><div class="list" id="searchResults"></div></div>
+<div class="searcharea">
+  <input id="searchInput" class="searchinput" placeholder="Search music…">
+  <div class="search-modes" id="searchModes">
+    <button class="search-mode active" data-mode="all">ALL</button>
+    <button class="search-mode" data-mode="track">TRACKS</button>
+    <button class="search-mode" data-mode="artist">ARTISTS</button>
+    <button class="search-mode" data-mode="album">ALBUMS</button>
+    <button class="search-mode" data-mode="genre">GENRE</button>
+  </div>
+  <div class="list" id="searchResults"></div>
+</div>
 </div></section>
 
 <section id="queue" class="screen"><div class="subscreen">
@@ -416,12 +438,13 @@ box-shadow:0 0 14px rgba(211,164,75,.13)}
   <select id="deviceSelect"><option value="">Loading devices…</option></select>
   <button id="reloadDevices">REFRESH PLAYER</button>
   <small id="volumeStatus">JUKEBOX browser volume will appear here.</small>
+  <button id="playerLogToggle">PLAYER LOG ▾</button>
+  <pre id="playerLog" class="player-log">No player events recorded.</pre>
   <button id="logoutBtn">DISCONNECT SPOTIFY</button>
-  <small>Playback now runs inside the JUKEBOX browser player. The Spotify Android app is not required for normal playback.</small>
+  <small>Playback runs inside the JUKEBOX browser player. v17 automatically rebuilds a stale player after sleep and retries failed playback once.</small>
 </div>
 </aside>
 <div class="msg" id="msg"></div>
-<div id="dimOverlay" class="dim-overlay"></div>
 
 <div class="trackpick-overlay" id="trackPickOverlay">
   <div class="trackpick">
@@ -610,13 +633,20 @@ let pickedUri='';
 let currentMixTracks=[];
 let currentMixName='';
 
-function renderTracks(list,target){
- list.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
- target.innerHTML=list.map(t=>`<button class="row" data-uri="${esc(t.uri)}">
+function trackRowsHtml(list){
+ return (list||[]).map(t=>`<button class="row" data-uri="${esc(t.uri)}">
  ${imgUrl(t)?`<img src="${esc(imgUrl(t))}" alt="">`:'<div></div>'}
  <div class="song"><b>${esc(t.name)}</b><span>${esc((t.artists||[]).map(a=>a.name).join(', '))}</span></div>
- <span class="dur">${fmt(t.duration_ms)}</span></button>`).join('');
- target.querySelectorAll('.row').forEach(b=>b.onclick=()=>chooseTrack(b.dataset.uri))
+ <span class="dur">${fmt(t.duration_ms)}</span></button>`).join('')
+}
+function bindTrackRows(target){
+ target.querySelectorAll('[data-uri]').forEach(b=>b.onclick=()=>chooseTrack(b.dataset.uri))
+}
+function renderTracks(list,target){
+ list=(list||[]).filter(Boolean);
+ list.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
+ target.innerHTML=trackRowsHtml(list) || '<div class="search-empty">No tracks found.</div>';
+ bindTrackRows(target)
 }
 
 function chooseTrack(uri){
@@ -644,6 +674,157 @@ async function fetchSearchPages(q,pages=5){
  }
  return all
 }
+
+const artistCache=new Map();
+const albumCache=new Map();
+let searchMode='all';
+let searchSeq=0;
+
+function dedupeTracks(list){
+ const seen=new Set(),out=[];
+ for(const t of (list||[])){
+  if(!t?.uri)continue;
+  const k=normTrackKey(t);
+  if(seen.has(k))continue;
+  seen.add(k);out.push(t)
+ }
+ return out
+}
+function artistRowsHtml(list){
+ return (list||[]).map(a=>{
+  if(a?.id)artistCache.set(a.id,a);
+  const art=a?.images?.[0]?.url||'';
+  return `<button class="row entity-row" data-artistid="${esc(a.id||'')}">
+   ${art?`<img src="${esc(art)}" alt="">`:'<div></div>'}
+   <div class="song"><b>${esc(a.name||'Unknown artist')}</b><span>ARTIST</span></div>
+   <span class="dur">OPEN</span></button>`
+ }).join('')
+}
+function albumRowsHtml(list){
+ return (list||[]).map(a=>{
+  if(a?.id)albumCache.set(a.id,a);
+  const art=a?.images?.[0]?.url||'';
+  const artists=(a?.artists||[]).map(x=>x.name).join(', ');
+  return `<button class="row entity-row" data-albumid="${esc(a.id||'')}">
+   ${art?`<img src="${esc(art)}" alt="">`:'<div></div>'}
+   <div class="song"><b>${esc(a.name||'Unknown album')}</b><span>${esc(artists||'ALBUM')}</span></div>
+   <span class="dur">OPEN</span></button>`
+ }).join('')
+}
+function bindSearchEntities(target){
+ bindTrackRows(target);
+ target.querySelectorAll('[data-artistid]').forEach(b=>b.onclick=()=>openSearchArtist(b.dataset.artistid));
+ target.querySelectorAll('[data-albumid]').forEach(b=>b.onclick=()=>openSearchAlbum(b.dataset.albumid))
+}
+function setSearchMode(mode,rerun=true){
+ searchMode=mode;
+ document.querySelectorAll('.search-mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+ const placeholders={
+  all:'Search music…',
+  track:'Search track title…',
+  artist:'Search artist…',
+  album:'Search album…',
+  genre:'Search genre e.g. grunge, thrash metal…'
+ };
+ $('searchInput').placeholder=placeholders[mode]||placeholders.all;
+ if(rerun){
+  const q=$('searchInput').value.trim();
+  if(q.length>=2)runSearch(q)
+ }
+}
+function addSearchBack(label){
+ $('searchResults').insertAdjacentHTML('afterbegin',`<button class="search-back" id="searchBackBtn">‹ ${esc(label)}</button>`);
+ $('searchBackBtn').onclick=()=>runSearch($('searchInput').value.trim())
+}
+async function openSearchArtist(id){
+ const a=artistCache.get(id);if(!a)return;
+ const seq=++searchSeq;
+ $('searchResults').innerHTML='<div class="search-empty">Loading '+esc(a.name)+' tracks…</div>';
+ try{
+  const aq='artist:"'+String(a.name||'').replace(/"/g,'')+'"';
+  const raw=await fetchSearchPages(aq,5);
+  if(seq!==searchSeq)return;
+  const exact=dedupeTracks(raw.filter(t=>(t.artists||[]).some(x=>String(x.name||'').toLowerCase()===String(a.name||'').toLowerCase())));
+  currentMixTracks=exact;
+  currentMixName=a.name||'ARTIST';
+  renderTracks(exact,$('searchResults'));
+  addSearchBack('ARTIST RESULTS')
+ }catch(e){if(seq===searchSeq)toast(e.message)}
+}
+async function openSearchAlbum(id){
+ const a=albumCache.get(id);if(!a)return;
+ const seq=++searchSeq;
+ $('searchResults').innerHTML='<div class="search-empty">Loading '+esc(a.name)+'…</div>';
+ try{
+  const d=await api('/albums/'+encodeURIComponent(id)+'/tracks?limit=50');
+  if(seq!==searchSeq)return;
+  const tracks=dedupeTracks((d?.items||[]).map(t=>({
+   ...t,
+   album:{name:a.name||'',images:a.images||[]}
+  })));
+  currentMixTracks=tracks;
+  currentMixName=a.name||'ALBUM';
+  renderTracks(tracks,$('searchResults'));
+  addSearchBack('ALBUM RESULTS')
+ }catch(e){if(seq===searchSeq)toast(e.message)}
+}
+async function runSearch(q){
+ q=String(q||'').trim();
+ const seq=++searchSeq;
+ currentMixTracks=[];
+ currentMixName='';
+ $('categoryRandomBtn').style.display='none';
+ if(q.length<2){$('searchResults').innerHTML='';return}
+ $('searchResults').innerHTML='<div class="search-empty">Searching…</div>';
+ try{
+  if(searchMode==='track'){
+   const tracks=dedupeTracks(await fetchSearchPages(q,5));
+   if(seq!==searchSeq)return;
+   currentMixTracks=tracks;currentMixName='SEARCH';
+   renderTracks(tracks,$('searchResults'));
+   return
+  }
+  if(searchMode==='genre'){
+   const genreQuery='genre:"'+q.replace(/"/g,'')+'"';
+   const tracks=dedupeTracks(await fetchSearchPages(genreQuery,5));
+   if(seq!==searchSeq)return;
+   currentMixTracks=tracks;currentMixName=q.toUpperCase();
+   renderTracks(tracks,$('searchResults'));
+   if(!tracks.length)$('searchResults').innerHTML='<div class="search-empty">No matching genre tracks. Try a simpler genre name.</div>';
+   return
+  }
+  if(searchMode==='artist'){
+   const d=await api('/search?type=artist&limit=30&q='+encodeURIComponent(q));
+   if(seq!==searchSeq)return;
+   const artists=d?.artists?.items||[];
+   $('searchResults').innerHTML=artistRowsHtml(artists)||'<div class="search-empty">No artists found.</div>';
+   bindSearchEntities($('searchResults'));
+   return
+  }
+  if(searchMode==='album'){
+   const d=await api('/search?type=album&limit=30&q='+encodeURIComponent(q));
+   if(seq!==searchSeq)return;
+   const albums=d?.albums?.items||[];
+   $('searchResults').innerHTML=albumRowsHtml(albums)||'<div class="search-empty">No albums found.</div>';
+   bindSearchEntities($('searchResults'));
+   return
+  }
+
+  const d=await api('/search?type=artist,track,album&limit=8&q='+encodeURIComponent(q));
+  if(seq!==searchSeq)return;
+  const artists=d?.artists?.items||[];
+  const tracks=dedupeTracks(d?.tracks?.items||[]);
+  const albums=d?.albums?.items||[];
+  tracks.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
+  let out='';
+  if(artists.length)out+='<div class="search-section-title">ARTISTS</div>'+artistRowsHtml(artists);
+  if(tracks.length)out+='<div class="search-section-title">TRACKS</div>'+trackRowsHtml(tracks);
+  if(albums.length)out+='<div class="search-section-title">ALBUMS</div>'+albumRowsHtml(albums);
+  $('searchResults').innerHTML=out||'<div class="search-empty">No results found.</div>';
+  bindSearchEntities($('searchResults'))
+ }catch(e){if(seq===searchSeq)toast(e.message)}
+}
+
 function shuffleCopy(arr){
  const a=[...arr];
  for(let i=a.length-1;i>0;i--){
@@ -734,21 +915,61 @@ let webInitPromise=null;
 let sdkLoadPromise=null;
 let webState=null;
 let webStateRefreshTimer=null;
+let recoveryPromise=null;
+let playerPhase='CONNECTING';
+let ignoreNotReadyUntil=0;
+let userPaused=false;
+let suppressAutoResumeUntil=0;
+let pauseRecoveryTimer=null;
+const PLAYER_LOG_KEY='jukebox_player_log_v17';
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function withTimeout(p,ms,message='Player response timed out'){
+ return Promise.race([
+  Promise.resolve(p),
+  new Promise((_,reject)=>setTimeout(()=>reject(Error(message)),ms))
+ ])
+}
 
+function getPlayerLog(){
+ try{return JSON.parse(localStorage.getItem(PLAYER_LOG_KEY)||'[]')}catch{return []}
+}
+function renderPlayerLog(){
+ const el=$('playerLog');if(!el)return;
+ const items=getPlayerLog();
+ el.textContent=items.length
+  ?items.map(x=>x.time+' · '+x.type+(x.detail?' · '+x.detail:'')).join('\n')
+  :'No player events recorded.'
+}
+function logPlayerEvent(type,detail=''){
+ const d=new Date();
+ const time=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+ const items=getPlayerLog();
+ items.unshift({time,type:String(type||''),detail:String(detail||'').slice(0,160)});
+ localStorage.setItem(PLAYER_LOG_KEY,JSON.stringify(items.slice(0,30)));
+ renderPlayerLog()
+}
+function setPlayerPhase(phase,detail=''){
+ playerPhase=phase;
+ $('playingOn').textContent='JUKEBOX PLAYER · '+phase+(detail?' · '+detail:'')
+}
 function setVolumeSupport(){
  const box=document.querySelector('.volbox');
  box?.classList.remove('volume-disabled');
  $('volumeSlider').disabled=false;
  $('volumeStatus').textContent='Volume: controlled directly by the JUKEBOX browser player.'
 }
-
 function setDeviceIndicator(){
- $('playingOn').textContent=webReady
-  ?'PLAYING ON · JUKEBOX · BROWSER'
-  :'PLAYING ON · JUKEBOX · Connecting…';
+ if(webReady)setPlayerPhase('READY');
+ else if(playerPhase!=='RECONNECTING'&&playerPhase!=='ERROR')setPlayerPhase('CONNECTING');
  setVolumeSupport()
+}
+async function isWebPlayerHealthy(){
+ if(!webPlayer||!webReady||!webDeviceId)return false;
+ try{
+  await withTimeout(webPlayer.getVolume(),1800,'JUKEBOX player did not respond');
+  return true
+ }catch{return false}
 }
 
 function loadSpotifySDK(){
@@ -813,14 +1034,61 @@ function applyWebState(state){
  if(t.uri)rememberRecentUri(t.uri)
 }
 
+function handlePlayerStateChanged(state){
+ const prev=webState;
+ applyWebState(state);
+ if(!state){
+  logPlayerEvent('STATE','No playback state');
+  return
+ }
+ const t=state.track_window?.current_track;
+ const prevT=prev?.track_window?.current_track;
+ const sameTrack=!!t?.uri&&t.uri===prevT?.uri;
+ const pos=Number(state.position||0);
+ const dur=Number(state.duration||t?.duration_ms||0);
+
+ if(!state.paused){
+  if(userPaused)userPaused=false;
+  return
+ }
+
+ const unexpected=
+  !!prev &&
+  !prev.paused &&
+  sameTrack &&
+  pos>1500 &&
+  (!dur || pos<dur-5000) &&
+  !userPaused &&
+  Date.now()>suppressAutoResumeUntil;
+
+ if(!unexpected)return;
+
+ logPlayerEvent('UNEXPECTED PAUSE',(t?.name||'track')+' @ '+fmt(pos));
+ clearTimeout(pauseRecoveryTimer);
+ pauseRecoveryTimer=setTimeout(async()=>{
+  if(userPaused||document.visibilityState!=='visible')return;
+  try{
+   const s=await webPlayer?.getCurrentState();
+   const same=s?.track_window?.current_track?.uri===t?.uri;
+   if(s&&s.paused&&same){
+    logPlayerEvent('AUTO RESUME','Retrying '+(t?.name||'track'));
+    await runPlaybackAction('AUTO RESUME',()=>webPlayer.resume());
+    setTimeout(()=>refreshPlayer().catch(()=>{}),250)
+   }
+  }catch(e){logPlayerEvent('AUTO RESUME FAILED',e.message)}
+ },1200)
+}
+
 async function createWebPlayer(){
  await loadSpotifySDK();
  if(webPlayer){
+  ignoreNotReadyUntil=Date.now()+1800;
   try{webPlayer.disconnect()}catch{}
   webPlayer=null
  }
  webReady=false;
  webDeviceId='';
+ setPlayerPhase('CONNECTING');
  setDeviceIndicator();
 
  const startVol=Math.max(0,Math.min(100,Number(localStorage.getItem('jukebox_web_volume')||65)))/100;
@@ -840,6 +1108,7 @@ async function createWebPlayer(){
   localStorage.setItem('spotify_device_id',device_id);
   localStorage.setItem('spotify_device_name','JUKEBOX');
   setDeviceIndicator();
+  logPlayerEvent('READY','Device '+device_id.slice(0,8));
   $('deviceSelect').innerHTML='<option value="'+esc(device_id)+'" selected>JUKEBOX · browser player</option>';
   $('deviceSelect').disabled=true;
   webPlayer.getVolume().then(v=>{
@@ -849,13 +1118,31 @@ async function createWebPlayer(){
   }).catch(()=>{});
  });
 
- webPlayer.addListener('not_ready',()=>{
+ webPlayer.addListener('not_ready',({device_id}={})=>{
+  const shouldResume=!!webState&&!webState.paused&&!userPaused&&document.visibilityState==='visible';
   webReady=false;
-  setDeviceIndicator()
+  setPlayerPhase('RECONNECTING');
+  logPlayerEvent('NOT READY',device_id?('Device '+device_id.slice(0,8)):'SDK disconnected');
+  if(Date.now()<ignoreNotReadyUntil)return;
+  if(document.visibilityState==='visible'){
+   setTimeout(()=>{
+    recoverWebPlayer('SDK not_ready',false).then(async()=>{
+     if(shouldResume&&!userPaused){
+      try{
+       await runPlaybackAction('RESUME AFTER RECONNECT',()=>webPlayer.resume());
+       logPlayerEvent('RESUMED','After reconnect')
+      }catch(e){logPlayerEvent('RESUME FAILED',e.message)}
+     }
+    }).catch(e=>{
+     setPlayerPhase('ERROR');
+     logPlayerEvent('RECOVERY FAILED',e.message)
+    })
+   },250)
+  }
  });
 
  webPlayer.addListener('player_state_changed',state=>{
-  applyWebState(state);
+  handlePlayerStateChanged(state);
   clearTimeout(webStateRefreshTimer);
   webStateRefreshTimer=setTimeout(()=>{
    refreshQueueCount().catch(()=>{})
@@ -864,12 +1151,15 @@ async function createWebPlayer(){
 
  const sdkError=kind=>({message})=>{
   console.error('Spotify '+kind+':',message);
+  logPlayerEvent(kind.toUpperCase(),message||'');
   toast(kind==='account error'?'Spotify Premium is required':message||('Spotify '+kind))
  };
  webPlayer.addListener('initialization_error',sdkError('initialization error'));
  webPlayer.addListener('authentication_error',({message})=>{
   console.error('Spotify authentication error:',message);
+  logPlayerEvent('AUTH ERROR',message||'');
   localStorage.removeItem('spotify_auth_version');
+  setPlayerPhase('ERROR','AUTH');
   toast('Spotify needs to reconnect')
  });
  webPlayer.addListener('account_error',sdkError('account error'));
@@ -895,26 +1185,98 @@ async function createWebPlayer(){
 async function initWebPlayer(force=false){
  if(force){
   webInitPromise=null;
+  ignoreNotReadyUntil=Date.now()+1800;
   if(webPlayer){try{webPlayer.disconnect()}catch{}}
   webPlayer=null;webReady=false;webDeviceId=''
  }
- if(webReady&&webDeviceId)return webDeviceId;
+ if(webReady&&webDeviceId&&await isWebPlayerHealthy())return webDeviceId;
  if(webInitPromise)return webInitPromise;
- webInitPromise=createWebPlayer().catch(e=>{
-  webInitPromise=null;
+
+ webInitPromise=createWebPlayer();
+ try{
+  return await webInitPromise
+ }catch(e){
   webReady=false;
-  setDeviceIndicator();
+  setPlayerPhase('ERROR');
+  logPlayerEvent('INIT FAILED',e.message);
   throw e
- });
- return webInitPromise
+ }finally{
+  // Critical v17 fix: never keep a settled/stale initialisation promise.
+  webInitPromise=null
+ }
+}
+
+async function recoverWebPlayer(reason='Player check',forceHard=false){
+ if(recoveryPromise)return recoveryPromise;
+ recoveryPromise=(async()=>{
+  setPlayerPhase('RECONNECTING');
+  logPlayerEvent('RECONNECT',reason+(forceHard?' · hard':''));
+
+  if(!forceHard&&webPlayer){
+   try{
+    if(!webReady){
+     const connected=await withTimeout(webPlayer.connect(),2500,'Reconnect timed out');
+     if(connected===false)throw Error('Reconnect rejected');
+     await waitForWebDevice(3500)
+    }
+    if(await isWebPlayerHealthy()){
+     setPlayerPhase('READY');
+     logPlayerEvent('RECOVERED','Existing player');
+     return webDeviceId
+    }
+   }catch(e){
+    logPlayerEvent('SOFT RECOVERY FAILED',e.message)
+   }
+  }
+
+  await initWebPlayer(true);
+  if(!await isWebPlayerHealthy())throw Error('Fresh JUKEBOX player is not responding');
+
+  // Re-register the fresh device as the active Spotify target, without forcing a song.
+  try{
+   await api('/me/player',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({device_ids:[webDeviceId],play:false})
+   })
+  }catch(e){logPlayerEvent('TRANSFER WARNING',e.message)}
+
+  targetDevice=webDeviceId;
+  setPlayerPhase('READY');
+  logPlayerEvent('RECOVERED','Fresh player');
+  return webDeviceId
+ })();
+
+ try{return await recoveryPromise}
+ finally{recoveryPromise=null}
 }
 
 async function ensureDevice(){
- if(!webReady||!webDeviceId){
-  await initWebPlayer()
+ if(!await isWebPlayerHealthy()){
+  await recoverWebPlayer('Health check',false)
  }
  targetDevice=webDeviceId;
  return {id:webDeviceId,name:'JUKEBOX',is_active:true,supports_volume:true}
+}
+
+async function runPlaybackAction(label,action){
+ activateWebPlayer();
+ try{
+  await ensureDevice();
+  return await action()
+ }catch(first){
+  logPlayerEvent(label+' FAILED',first.message);
+  await recoverWebPlayer(label,true);
+  try{
+   const result=await action();
+   logPlayerEvent(label+' RETRY','Succeeded');
+   return result
+  }catch(second){
+   setPlayerPhase('ERROR');
+   logPlayerEvent(label+' RETRY FAILED',second.message);
+   throw second
+  }
+ }
 }
 
 async function loadDevices(){
@@ -940,9 +1302,9 @@ function activateWebPlayer(){
 }
 
 function showDeviceRecovery(message){
- toast(message||'JUKEBOX browser player is reconnecting');
- $('settingsPanel').classList.add('open');
- openDrawer()
+ logPlayerEvent('PLAYBACK ISSUE',message||'Unknown player issue');
+ toast(message||'JUKEBOX player could not recover');
+ if(!webReady)setPlayerPhase('ERROR')
 }
 
 
@@ -969,12 +1331,13 @@ async function playTrackList(tracks,label){
  const mix=(tracks||[]).filter(t=>t?.uri).slice(0,15);
  if(!mix.length)return;
  try{
-  await ensureDevice();
-  await api('/me/player/play?device_id='+encodeURIComponent(targetDevice),{
+  userPaused=false;
+  suppressAutoResumeUntil=Date.now()+1800;
+  await runPlaybackAction('PLAY MIX',()=>api('/me/player/play?device_id='+encodeURIComponent(webDeviceId),{
    method:'PUT',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({uris:mix.map(t=>t.uri)})
-  });
+  }));
   mix.forEach(t=>rememberRecentUri(t.uri));
   toast('Playing '+mix.length+'-track '+(label||'mix'));
   closeTrackPick();
@@ -1002,22 +1365,24 @@ $('playMixBtn').onclick=playSelectedMix;
 
 async function playUri(uri){
  try{
-  await ensureDevice();
-  await api('/me/player/play?device_id='+encodeURIComponent(targetDevice),{
+  userPaused=false;
+  suppressAutoResumeUntil=Date.now()+1800;
+  await runPlaybackAction('PLAY NOW',()=>api('/me/player/play?device_id='+encodeURIComponent(webDeviceId),{
    method:'PUT',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({uris:[uri]})
-  });
-  setTimeout(refreshPlayer,450);
+  }));
+  setTimeout(()=>refreshPlayer().catch(()=>{}),450);
   showScreen('player')
  }catch(e){showDeviceRecovery(e.message)}
 }
 
 async function addToQueue(uri){
  try{
-  await ensureDevice();
-  const qs='?uri='+encodeURIComponent(uri)+(targetDevice?'&device_id='+encodeURIComponent(targetDevice):'');
-  await api('/me/player/queue'+qs,{method:'POST'});
+  await runPlaybackAction('ADD TO QUEUE',()=>{
+   const qs='?uri='+encodeURIComponent(uri)+'&device_id='+encodeURIComponent(webDeviceId);
+   return api('/me/player/queue'+qs,{method:'POST'})
+  });
   const t=trackCache.get(uri);
   const artist=(t?.artists||[]).map(a=>a.name).join(', ');
   closeTrackPick();
@@ -1073,9 +1438,11 @@ async function refreshPlayer(){
 
 async function togglePlay(){
  activateWebPlayer();
- await ensureDevice();
- if(!webPlayer)throw Error('JUKEBOX browser player is not ready');
- await webPlayer.togglePlay();
+ const current=webState;
+ userPaused=!!current&&!current.paused;
+ if(!userPaused)userPaused=false;
+ suppressAutoResumeUntil=Date.now()+3500;
+ await runPlaybackAction('PLAY / PAUSE',()=>webPlayer.togglePlay());
  setTimeout(()=>refreshPlayer().catch(()=>{}),250)
 }
 $('miniPlay').onclick=e=>{
@@ -1089,9 +1456,8 @@ $('bigPlay').onclick=()=>{
 };
 async function command(c){
  activateWebPlayer();
- await ensureDevice();
- if(c==='prev')await webPlayer.previousTrack();
- else await webPlayer.nextTrack();
+ suppressAutoResumeUntil=Date.now()+1800;
+ await runPlaybackAction(c==='prev'?'PREVIOUS':'NEXT',()=>c==='prev'?webPlayer.previousTrack():webPlayer.nextTrack());
  setTimeout(()=>refreshPlayer().catch(()=>{}),300)
 }
 document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=e=>{
@@ -1101,10 +1467,11 @@ document.querySelectorAll('[data-cmd]').forEach(b=>b.onclick=e=>{
 });
 $('refreshPlayer').onclick=async()=>{
  try{
-  await ensureDevice();
+  await recoverWebPlayer('Player refresh button',false);
   const state=await webPlayer.getCurrentState();
-  if(state)applyWebState(state);
-  await refreshPlayer()
+  if(state)handlePlayerStateChanged(state);
+  await refreshPlayer();
+  toast('Player refreshed')
  }catch(e){toast(e.message)}
 };
 
@@ -1116,8 +1483,7 @@ $('volumeSlider').oninput=()=>{
  clearTimeout(vt);
  vt=setTimeout(async()=>{
   try{
-   await ensureDevice();
-   await webPlayer.setVolume(Math.max(0,Math.min(100,pct))/100)
+   await runPlaybackAction('VOLUME',()=>webPlayer.setVolume(Math.max(0,Math.min(100,pct))/100))
   }catch(e){toast(e.message)}
  },80)
 };
@@ -1133,8 +1499,8 @@ $('seekSlider').onchange=async()=>{
   setTimeout(()=>refreshPlayer().catch(()=>{}),150)
  }catch(e){toast(e.message)}
 };
-$('shuffleBtn').onclick=async()=>{activateWebPlayer();await ensureDevice();const s=await api('/me/player');await api('/me/player/shuffle?state='+(!s.shuffle_state)+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'});toast('Shuffle '+(!s.shuffle_state?'on':'off'))};
-$('repeatBtn').onclick=async()=>{activateWebPlayer();await ensureDevice();const s=await api('/me/player');const n=s.repeat_state==='off'?'context':'off';await api('/me/player/repeat?state='+n+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'});toast('Repeat '+n)};
+$('shuffleBtn').onclick=async()=>{try{const s=await api('/me/player');const next=!s?.shuffle_state;await runPlaybackAction('SHUFFLE',()=>api('/me/player/shuffle?state='+next+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'}));toast('Shuffle '+(next?'on':'off'))}catch(e){toast(e.message)}};
+$('repeatBtn').onclick=async()=>{try{const s=await api('/me/player');const n=s?.repeat_state==='off'?'context':'off';await runPlaybackAction('REPEAT',()=>api('/me/player/repeat?state='+n+'&device_id='+encodeURIComponent(webDeviceId),{method:'PUT'}));toast('Repeat '+n)}catch(e){toast(e.message)}};
 async function refreshQueueCount(){
  try{
   const d=await api('/me/player/queue');
@@ -1164,8 +1530,14 @@ async function openQueue(){
 $('queueBtn').onclick=openQueue;
 
 let st;
-$('searchInput').oninput=()=>{clearTimeout(st);const q=$('searchInput').value.trim();if(q.length<2){$('searchResults').innerHTML='';return}
-st=setTimeout(async()=>{try{currentMixTracks=[];$('categoryRandomBtn').style.display='none';const tracks=await fetchSearchPages(q,2);renderTracks(tracks,$('searchResults'))}catch(e){toast(e.message)}},300)};
+document.querySelectorAll('.search-mode').forEach(b=>b.onclick=()=>setSearchMode(b.dataset.mode));
+setSearchMode('all',false);
+$('searchInput').oninput=()=>{
+ clearTimeout(st);
+ const q=$('searchInput').value.trim();
+ if(q.length<2){searchSeq++;$('searchResults').innerHTML='';return}
+ st=setTimeout(()=>runSearch(q),450)
+};
 $('favouritesBtn').onclick=async()=>{currentMixTracks=[];$('categoryRandomBtn').style.display='none';showScreen('results');$('resultsTitle').textContent='FAVOURITES';try{const d=await api('/me/tracks?limit=50');renderTracks((d?.items||[]).map(x=>x.track||x.item).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
 $('recentBtn').onclick=async()=>{currentMixTracks=[];$('categoryRandomBtn').style.display='none';showScreen('results');$('resultsTitle').textContent='RECENTLY PLAYED';try{const d=await api('/me/player/recently-played?limit=50');renderTracks((d?.items||[]).map(x=>x.track).filter(Boolean),$('resultsList'))}catch(e){toast(e.message)}};
 
@@ -1176,6 +1548,13 @@ $('drawerHome').onclick=()=>{closeDrawer();showScreen('home')};
 $('drawerNow').onclick=()=>{closeDrawer();showScreen('player')};
 $('drawerQueue').onclick=()=>{closeDrawer();openQueue()};
 $('settingsToggle').onclick=()=>{$('settingsPanel').classList.toggle('open')};
+$('playerLogToggle').onclick=()=>{
+ const el=$('playerLog');
+ el.classList.toggle('open');
+ $('playerLogToggle').textContent=el.classList.contains('open')?'PLAYER LOG ▴':'PLAYER LOG ▾';
+ renderPlayerLog()
+};
+renderPlayerLog();
 $('logoutBtn').onclick=()=>{try{webPlayer?.disconnect()}catch{};['spotify_access_token','spotify_refresh_token','spotify_expires_at','spotify_device_id','spotify_device_name','spotify_auth_version'].forEach(k=>localStorage.removeItem(k));location.reload()};
 
 function syncFullscreenButton(){
@@ -1211,7 +1590,7 @@ function updateClock(){
 }
 updateClock();setInterval(updateClock,30000);
 
-let idleHomeTimer,dimTimer;
+let idleHomeTimer;
 function activeScreenId(){
  return screens.find(s=>s.classList.contains('active'))?.id||'home'
 }
@@ -1232,10 +1611,7 @@ function scheduleHomeReturn(){
  },90000)
 }
 function resetIdle(){
- $('dimOverlay').classList.remove('on');
- clearTimeout(dimTimer);
  scheduleHomeReturn();
- dimTimer=setTimeout(()=>$('dimOverlay').classList.add('on'),180000);
  requestWakeLock()
 }
 ['pointerdown','keydown','touchstart'].forEach(ev=>document.addEventListener(ev,resetIdle,{passive:true}));
@@ -1246,30 +1622,34 @@ async function requestWakeLock(){
  if(!('wakeLock' in navigator)||document.visibilityState!=='visible'||wakeLock)return;
  try{wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>wakeLock=null)}catch{}
 }
+async function recoverAfterWake(reason='Screen active'){
+ requestWakeLock();
+ setTimeout(async()=>{
+  try{
+   await recoverWebPlayer(reason,false);
+   const state=await webPlayer.getCurrentState();
+   if(state)handlePlayerStateChanged(state);
+   await refreshPlayer()
+  }catch(e){
+   setPlayerPhase('ERROR');
+   logPlayerEvent('WAKE RECOVERY FAILED',e.message)
+  }
+ },350)
+}
 document.addEventListener('visibilitychange',()=>{
- if(document.visibilityState==='visible'){
-  requestWakeLock();
-  if(webPlayer&&!webReady)webPlayer.connect().catch(()=>{});
-  setTimeout(async()=>{
-   try{
-    await ensureDevice();
-    const state=await webPlayer.getCurrentState();
-    if(state)applyWebState(state);
-    await refreshPlayer()
-   }catch{}
-  },350)
- }
+ if(document.visibilityState==='visible')recoverAfterWake('Visibility restored')
 });
+window.addEventListener('pageshow',()=>recoverAfterWake('Page restored'));
 requestWakeLock();
 
-async function bootJukeboxV16(){
+async function bootJukeboxV17(){
  renderCategories();
 
  // First return from the one-time expanded Spotify authorisation.
  const exchanged=await exchangeWebPlaybackCode();
 
  // Existing v15 tokens do not contain the Web Playback streaming permissions.
- // On the first v16 load, obtain the expanded scopes once and return here.
+ // Existing Web Playback authorisation is reused; no new scopes are required for v17.
  if(!exchanged && localStorage.getItem('spotify_auth_version')!==WEB_AUTH_VERSION){
   await beginWebPlaybackLogin();
   return
@@ -1295,7 +1675,7 @@ async function bootJukeboxV16(){
  setInterval(()=>refreshPlayer().catch(()=>{}),5000);
  setInterval(()=>refreshQueueCount().catch(()=>{}),30000)
 }
-bootJukeboxV16().catch(e=>toast(e.message));
+bootJukeboxV17().catch(e=>{logPlayerEvent("BOOT FAILED",e.message);toast(e.message)});
 </script>
 </body>
 </html>
