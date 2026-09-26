@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon-192.png">
-<!-- Jukebox v17: search + resilient Web Playback recovery; v12/v15 visuals preserved -->
+<!-- Jukebox v18: search + resilient Web Playback recovery; v12/v15 visuals preserved -->
 <title>Jukebox</title>
 <style>
 :root{
@@ -768,6 +768,31 @@ async function openSearchAlbum(id){
   addSearchBack('ALBUM RESULTS')
  }catch(e){if(seq===searchSeq)toast(e.message)}
 }
+function spotifyField(field,value){
+ return field+':"'+String(value||'').replace(/"/g,'').trim()+'"'
+}
+async function tracksForArtistName(name,pages=2){
+ const aq=spotifyField('artist',name);
+ const raw=await fetchSearchPages(aq,pages);
+ const wanted=String(name||'').toLowerCase();
+ return dedupeTracks(raw.filter(t=>(t.artists||[]).some(a=>String(a.name||'').toLowerCase()===wanted)))
+}
+async function genreResults(q){
+ // Spotify's direct genre->track search can be very noisy. Resolve the genre to artists first,
+ // then build the playable list only from those returned artists.
+ const gq=spotifyField('genre',q);
+ const d=await api('/search?type=artist&limit=10&q='+encodeURIComponent(gq));
+ const artists=d?.artists?.items||[];
+ if(!artists.length)return {artists:[],tracks:[]};
+ const chosen=artists.slice(0,6);
+ const buckets=await Promise.all(chosen.map(a=>tracksForArtistName(a.name,1).catch(()=>[])));
+ const tracks=[];
+ for(let round=0;round<2;round++){
+  for(const bucket of buckets){if(bucket[round])tracks.push(bucket[round])}
+ }
+ return {artists,tracks:dedupeTracks(tracks)}
+}
+
 async function runSearch(q){
  q=String(q||'').trim();
  const seq=++searchSeq;
@@ -778,23 +803,29 @@ async function runSearch(q){
  $('searchResults').innerHTML='<div class="search-empty">Searching…</div>';
  try{
   if(searchMode==='track'){
-   const tracks=dedupeTracks(await fetchSearchPages(q,5));
+   const tq=spotifyField('track',q);
+   let tracks=dedupeTracks(await fetchSearchPages(tq,5));
    if(seq!==searchSeq)return;
-   currentMixTracks=tracks;currentMixName='SEARCH';
+   currentMixTracks=tracks;currentMixName='TRACK SEARCH';
    renderTracks(tracks,$('searchResults'));
+   if(!tracks.length)$('searchResults').innerHTML='<div class="search-empty">No track-title matches found.</div>';
    return
   }
   if(searchMode==='genre'){
-   const genreQuery='genre:"'+q.replace(/"/g,'')+'"';
-   const tracks=dedupeTracks(await fetchSearchPages(genreQuery,5));
+   const result=await genreResults(q);
    if(seq!==searchSeq)return;
-   currentMixTracks=tracks;currentMixName=q.toUpperCase();
-   renderTracks(tracks,$('searchResults'));
-   if(!tracks.length)$('searchResults').innerHTML='<div class="search-empty">No matching genre tracks. Try a simpler genre name.</div>';
+   currentMixTracks=result.tracks;currentMixName=q.toUpperCase();
+   let out='';
+   if(result.artists.length)out+='<div class="search-section-title">ARTISTS IN '+esc(q.toUpperCase())+'</div>'+artistRowsHtml(result.artists);
+   if(result.tracks.length)out+='<div class="search-section-title">TRACKS FROM THOSE ARTISTS</div>'+trackRowsHtml(result.tracks);
+   $('searchResults').innerHTML=out||'<div class="search-empty">No Spotify artists found for that genre. Try a broader genre name.</div>';
+   result.tracks.forEach(t=>{if(t?.uri)trackCache.set(t.uri,t)});
+   bindSearchEntities($('searchResults'));
    return
   }
   if(searchMode==='artist'){
-   const d=await api('/search?type=artist&limit=30&q='+encodeURIComponent(q));
+   const aq=spotifyField('artist',q);
+   const d=await api('/search?type=artist&limit=10&q='+encodeURIComponent(aq));
    if(seq!==searchSeq)return;
    const artists=d?.artists?.items||[];
    $('searchResults').innerHTML=artistRowsHtml(artists)||'<div class="search-empty">No artists found.</div>';
@@ -802,7 +833,8 @@ async function runSearch(q){
    return
   }
   if(searchMode==='album'){
-   const d=await api('/search?type=album&limit=30&q='+encodeURIComponent(q));
+   const aq=spotifyField('album',q);
+   const d=await api('/search?type=album&limit=10&q='+encodeURIComponent(aq));
    if(seq!==searchSeq)return;
    const albums=d?.albums?.items||[];
    $('searchResults').innerHTML=albumRowsHtml(albums)||'<div class="search-empty">No albums found.</div>';
